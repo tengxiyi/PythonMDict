@@ -129,7 +129,7 @@ class SearchSplitPage(QWidget):
         self.page_dict.word_lookup_requested.connect(
             lambda w, c: self.do_search(w, context=c)
         )
-        self.page_dict.import_requested.connect(lambda: self.main.switch_page(3))
+        self.page_dict.import_requested.connect(lambda: self.main.switch_page('dict_manager'))
         self.web_dict.setPage(self.page_dict)
 
         # 新闻 Web 视图
