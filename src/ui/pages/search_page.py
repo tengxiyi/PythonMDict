@@ -172,21 +172,51 @@ class SearchSplitPage(QWidget):
     # ========== 辅助方法 ==========
 
     def get_random_word(self) -> dict | None:
-        """从数据库随机获取一个单词（用于每日一词）"""
+        """从数据库获取每日一词（按日期固定 + 过滤非法内容 + 排除停用词）"""
+        import re
+        import hashlib
+        from datetime import date
+        from ...core.utils import STOP_WORDS
+
+        # 合法单词模式：纯英文，允许内部连字符/撇号（如 mother-in-law, it's）
+        VALID_WORD = re.compile(r'^[a-zA-Z][a-zA-Z\'\-]*[a-zA-Z]$|^[a-zA-Z]{2,}$')
+
         try:
             with sqlite3.connect(DB_FILE) as conn:
                 cursor = conn.execute("SELECT count(*) FROM dict_info")
                 if cursor.fetchone()[0] == 0:
                     return None
-                
-                cursor = conn.execute(
-                    "SELECT word, content, dict_id FROM standard_entries ORDER BY RANDOM() LIMIT 1"
-                )
-                row = cursor.fetchone()
-                if row:
-                    return {"word": row[0], "content": row[1], "dict_id": row[2]}
+
+                # 基于日期生成确定性种子（同一天始终返回同一个词）
+                today = date.today()
+                seed = int(hashlib.md5(today.isoformat().encode()).hexdigest()[:8], 16)
+
+                # 取一批候选词，再按种子确定选哪一个
+                cursor = conn.execute("""
+                    SELECT word, content, dict_id FROM standard_entries 
+                    WHERE length(word) BETWEEN 2 AND 30 
+                      AND word GLOB '[a-zA-Z]*'
+                    ORDER BY ((? * rowid) % 1000000007) LIMIT 100
+                """, (seed,))
+                rows = cursor.fetchall()
+                if not rows:
+                    return None
+
+                # 从候选中按种子顺序逐个校验
+                start_idx = seed % len(rows)
+                for i in range(len(rows)):
+                    idx = (start_idx + i) % len(rows)
+                    word = rows[idx][0]
+
+                    # Python 层二次校验：纯英文且非停用词
+                    if (VALID_WORD.match(word)
+                            and word.lower() not in STOP_WORDS
+                            and len(word.strip()) >= 2):
+                        return {"word": word, "content": rows[idx][1], "dict_id": rows[idx][2]}
+
+                return None
         except Exception as e:
-            logger.debug(f"获取随机单词失败: {e}")
+            logger.debug(f"获取每日一词失败: {e}")
         return None
 
     def render_welcome_page(self):
