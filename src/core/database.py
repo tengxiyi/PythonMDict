@@ -108,18 +108,10 @@ class DatabaseManager:
             cur = conn.execute("SELECT count(*) FROM rss_sources")
             if cur.fetchone()[0] == 0:
                 defaults = [
-                    # 英文综合类
                     ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml"),
-                    ("Reuters World", "https://www.reutersagency.com/feed/?best-topics=world&post_type=best"),
                     ("NPR News", "https://feeds.npr.org/1001/rss.xml"),
-                    # 科技类
                     ("TechCrunch", "https://techcrunch.com/feed/"),
-                    ("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index"),
-                    ("Hacker News (Popular)", "https://hnrss.org/frontpage?count=30&points=100"),
-                    # 学习类（英语学习者友好）
                     ("China Daily World", "http://www.chinadaily.com.cn/rss/world_rss.xml"),
-                    ("VOA Learning English", "https://learningenglish.voanews.com/api/zjqvmcemjezpepmi"),
-                    ("Engoo Daily News", "https://www.engoo.com/rss/news_en.xml"),
                 ]
                 conn.executemany("INSERT INTO rss_sources (name, url) VALUES (?, ?)", defaults)
                 conn.commit()
