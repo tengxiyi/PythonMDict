@@ -15,7 +15,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QListWidget, QStackedWidget, QFrame, QSplitter, QAbstractItemView,
-    QToolButton, QTabWidget, QListWidgetItem,
+    QToolButton, QTabWidget, QListWidgetItem, QComboBox, QLabel,
 )
 from PySide6.QtCore import Qt, QPoint, Signal, QSize, QTimer, QUrl
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QPalette, QKeySequence, QShortcut
@@ -110,15 +110,36 @@ class SearchSplitPage(QWidget):
         self.entry.setFixedHeight(38)
         self.entry.returnPressed.connect(self.on_enter_pressed)
 
+        # 词典选择下拉框
+        self.combo_dict = QComboBox()
+        self.combo_dict.setFixedHeight(32)
+        self.combo_dict.currentIndexChanged.connect(self.on_dict_selected)
+
         v_top.addLayout(h_tools)
         v_top.addWidget(self.entry)
+        v_top.addWidget(self.combo_dict)
+
+        # 列表上方的模式提示标签
+        self.list_header = QLabel("搜索结果")
+        self.list_header.setStyleSheet("color:#888;font-size:11px;padding:4px 8px;")
+        self.list_header.setFixedHeight(22)
 
         self.list_widget = QListWidget()
         self.list_widget.setFrameShape(QFrame.NoFrame)
-        self.list_widget.itemClicked.connect(lambda i: self.do_search(i.text(), from_list=True))
+        self.list_widget.itemClicked.connect(self.on_list_item_clicked)
+        # 滚动到底部时加载更多（词典浏览模式）
+        self.list_widget.verticalScrollBar().valueChanged.connect(self.on_list_scroll)
 
         v_left.addWidget(self.top_container)
+        v_left.addWidget(self.list_header)
         v_left.addWidget(self.list_widget)
+
+        # 词典浏览模式的分页状态
+        self._browse_dict_id = None      # 当前浏览的词典ID
+        self._browse_offset = 0          # 分页偏移
+        self._browse_limit = 200         # 每页加载数
+        self._browse_loading = False     # 是否正在加载
+        self._browse_has_more = True     # 是否还有更多
 
         # === 右侧 Tab ===
         self.right_tabs = QTabWidget()
@@ -167,6 +188,7 @@ class SearchSplitPage(QWidget):
 
         self.refresh_icons()
         self.init_shortcuts()
+        self.load_dict_selector()   # 加载词典选择器
         self.render_welcome_page()  # 初始显示欢迎页
 
     # ========== 辅助方法 ==========
@@ -351,8 +373,16 @@ class SearchSplitPage(QWidget):
         self.entry.setFocus()
 
     def on_enter_pressed(self):
-        """回车触发搜索"""
-        self.do_search(self.entry.text(), update_news=True)
+        """回车触发搜索或过滤"""
+        if self._browse_dict_id is not None:
+            # 词典浏览模式：重新过滤并加载词条
+            self._browse_offset = 0
+            self._browse_has_more = True
+            self.list_widget.clear()
+            self.load_more_dict_entries()
+        else:
+            # 全部词典模式：全局搜索
+            self.do_search(self.entry.text(), update_news=True)
 
     def load_vocab_cache(self):
         """加载单词本缓存到内存"""
@@ -492,17 +522,6 @@ class SearchSplitPage(QWidget):
         self.current_source = "News" if context else "Dict"
         self.current_news_query = text
 
-        # 更新搜索历史列表
-        if not from_list:
-            if self.list_widget.count() > 0 and self.list_widget.item(0).text() == text:
-                pass
-            else:
-                items = self.list_widget.findItems(text, Qt.MatchExactly)
-                if items:
-                    self.list_widget.takeItem(self.list_widget.row(items[0]))
-                self.list_widget.insertItem(0, text)
-            self.list_widget.setCurrentRow(0)
-
         # 写入搜索历史数据库
         try:
             with sqlite3.connect(DB_FILE) as conn:
@@ -572,8 +591,25 @@ class SearchSplitPage(QWidget):
     def render_dict(self, q: str, rows: list, suggestions: list):
         """
         渲染词典搜索结果到 Web 视图
-        这是整个项目最复杂的渲染函数，生成完整的HTML页面
+        同时更新左侧列表（全部词典模式下显示搜索结果）
         """
+
+        # 全部词典模式：将搜索结果填充到左侧列表
+        if self._browse_dict_id is None:
+            self.list_widget.clear()
+            self.list_header.setText(f"搜索结果 ({len(rows)})")
+            for r in rows:
+                word = r.get("word", "")
+                dict_name = r.get("dict_name", "")
+                dict_id = r.get("dict_id", 0)
+                display = f"{word}  •  {dict_name}" if dict_name else word
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "type": "search_result",
+                    "word": word,
+                    "dict_id": dict_id,
+                })
+                self.list_widget.addItem(item)
 
         # 运行时重新获取 theme_manager（解决模块级 import 绑定时值为 None 的问题）
         # 防御性处理：如果theme_manager不可用，使用默认配色确保不白屏
@@ -1230,3 +1266,190 @@ class SearchSplitPage(QWidget):
         # 通知单词本页面刷新
         logger.debug(f"[Signal] vocab_changed.emit() - word={w}")
         self.vocab_changed.emit()
+
+    # ========== 词典选择与词条浏览 ==========
+
+    def load_dict_selector(self):
+        """加载词典列表到下拉框"""
+        self.combo_dict.blockSignals(True)
+        self.combo_dict.clear()
+        self.combo_dict.addItem("全部词典", None)
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                rows = conn.execute(
+                    "SELECT id, name FROM dict_info ORDER BY priority DESC, name"
+                ).fetchall()
+                for did, name in rows:
+                    self.combo_dict.addItem(name, did)
+        except Exception as e:
+            logger.warning(f"加载词典列表失败: {e}")
+        self.combo_dict.blockSignals(False)
+
+    def on_dict_selected(self, index: int):
+        """词典选择变化回调"""
+        dict_id = self.combo_dict.currentData()
+        if dict_id is None:
+            # 全部词典模式
+            self._browse_dict_id = None
+            self.list_header.setText("搜索结果")
+            self.entry.setPlaceholderText("Search...")
+            self.list_widget.clear()
+        else:
+            # 进入词典浏览模式
+            self._browse_dict_id = dict_id
+            self.list_header.setText(f"浏览: {self.combo_dict.currentText()}")
+            self.entry.setPlaceholderText("过滤词条...")
+            self._browse_offset = 0
+            self._browse_has_more = True
+            self.list_widget.clear()
+            self.load_more_dict_entries()
+
+    def load_more_dict_entries(self):
+        """加载更多词典词条（分页）"""
+        if self._browse_dict_id is None or self._browse_loading or not self._browse_has_more:
+            return
+
+        self._browse_loading = True
+        filter_text = self.entry.text().strip()
+
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                if filter_text:
+                    # 过滤模式
+                    rows = conn.execute(
+                        "SELECT word FROM standard_entries "
+                        "WHERE dict_id=? AND word LIKE ? "
+                        "ORDER BY word COLLATE NOCASE "
+                        "LIMIT ? OFFSET ?",
+                        (self._browse_dict_id, f"{filter_text}%",
+                         self._browse_limit, self._browse_offset)
+                    ).fetchall()
+                else:
+                    # 全量浏览模式
+                    rows = conn.execute(
+                        "SELECT word FROM standard_entries "
+                        "WHERE dict_id=? "
+                        "ORDER BY word COLLATE NOCASE "
+                        "LIMIT ? OFFSET ?",
+                        (self._browse_dict_id, self._browse_limit, self._browse_offset)
+                    ).fetchall()
+
+                for (word,) in rows:
+                    item = QListWidgetItem(word)
+                    item.setData(Qt.UserRole, {
+                        "type": "dict_entry",
+                        "word": word,
+                        "dict_id": self._browse_dict_id,
+                    })
+                    self.list_widget.addItem(item)
+
+                self._browse_has_more = len(rows) >= self._browse_limit
+                self._browse_offset += len(rows)
+
+        except Exception as e:
+            logger.warning(f"加载词条列表失败: {e}")
+        finally:
+            self._browse_loading = False
+
+    def on_list_scroll(self, value: int):
+        """列表滚动到底部时加载更多"""
+        scrollbar = self.list_widget.verticalScrollBar()
+        if scrollbar.maximum() > 0 and value >= scrollbar.maximum() - 20:
+            self.load_more_dict_entries()
+
+    def on_list_item_clicked(self, item: QListWidgetItem):
+        """列表项点击回调"""
+        data = item.data(Qt.UserRole)
+        if data is None:
+            # 兼容旧模式（纯文本项）
+            self.do_search(item.text(), from_list=True)
+            return
+
+        item_type = data.get("type")
+        word = data.get("word")
+        dict_id = data.get("dict_id")
+
+        if item_type == "dict_entry":
+            # 词典浏览模式：直接显示该词条在该词典中的解释
+            self.show_dict_entry(word, dict_id)
+        elif item_type == "search_result":
+            # 搜索结果模式：显示该搜索结果对应的解释
+            self.show_dict_entry(word, dict_id)
+        else:
+            self.do_search(word, from_list=True)
+
+    def show_dict_entry(self, word: str, dict_id: int):
+        """显示指定词条在指定词典中的解释"""
+        self.entry.setText(word)
+        self.check_fav(word)
+        self.current_context = ""
+        self.current_source = "Dict"
+
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                row = conn.execute(
+                    "SELECT content FROM standard_entries WHERE word=? AND dict_id=?",
+                    (word, dict_id)
+                ).fetchone()
+                if not row:
+                    self.web_dict.setHtml(
+                        f"<html><body><h3 style='color:#888;text-align:center;margin-top:50px'>"
+                        f"Not found: {word}</h3></body></html>"
+                    )
+                    return
+
+                from ...core.utils import process_entry_task
+                d_info_row = conn.execute(
+                    "SELECT name, path FROM dict_info WHERE id=?", (dict_id,)
+                ).fetchone()
+                d_info = {"name": d_info_row[0] if d_info_row else "未知",
+                          "path": d_info_row[1] if d_info_row else None}
+
+                result = process_entry_task((word, row[0], dict_id, 1.0, d_info))
+                if result:
+                    self._render_single_result(word, [result])
+
+        except Exception as e:
+            logger.error(f"显示词条失败({word}, did={dict_id}): {e}")
+            self.web_dict.setHtml(
+                f"<html><body><h3 style='color:#c00;text-align:center;margin-top:50px'>"
+                f"Error loading {word}</h3></body></html>"
+            )
+
+    def _render_single_result(self, word: str, results: list):
+        """渲染单个词条结果到Web视图（简化版 render_dict）"""
+        try:
+            from ..theme_manager import theme_manager as _tm
+            if _tm:
+                c = _tm.colors
+                css = _tm.get_webview_css() if hasattr(_tm, 'get_webview_css') else ""
+            else:
+                c = {'bg': '#ffffff', 'card': '#ffffff', 'text': '#333333',
+                     'primary': '#2196F3', 'border': '#E0E0E0'}
+                css = ""
+        except Exception:
+            c = {'bg': '#ffffff', 'card': '#ffffff', 'text': '#333333',
+                 'primary': '#2196F3', 'border': '#E0E0E0'}
+            css = ""
+
+        parts = []
+        for r in results:
+            html_content = r.get("html", "")
+            entry_word = r.get("word", word)
+            dict_name = r.get("dict_name", "")
+            parts.append(
+                f'<div class="entry-card">'
+                f'<div class="entry-header">'
+                f'<span class="entry-word">{entry_word}</span>'
+                f'<span class="dict-badge">{dict_name}</span></div>'
+                f'<div class="entry-body">{html_content}</div></div>'
+            )
+
+        _bg = c.get('bg', '#ffffff')
+        _fg = c.get('text', '#333333')
+        html = (
+            f"<html><head><style>{css}</style></head>"
+            f"<body style='background:{_bg};color:{_fg};'>{''.join(parts)}</body></html>"
+        )
+        self.web_dict.setHtml(html)
+        self.right_tabs.setCurrentIndex(0)
