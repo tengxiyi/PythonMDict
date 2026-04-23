@@ -45,6 +45,11 @@ class _PoolEntry:
                     conn.execute("PRAGMA mmap_size=536870912;")  # 512MB内存映射
                 except Exception:
                     pass
+            # WAL 模式：提高自动检查点阈值，减少阻塞频率（默认1000页≈4MB）
+            try:
+                conn.execute("PRAGMA wal_autocheckpoint=10000;")  # ~40MB
+            except Exception:
+                pass
             # 共享页面缓存 (~80MB)
             try:
                 conn.execute(f"PRAGMA cache_size={self._cache_size};")
@@ -91,6 +96,36 @@ class ConnectionPool:
     def get_mdd(self) -> sqlite3.Connection:
         """获取MDD资源数据库连接"""
         return self._mdd_pool.get()
+
+    def checkpoint(self, db_file: str = DB_FILE, mode: str = "PASSIVE") -> bool:
+        """
+        显式触发 WAL checkpoint，将 WAL 文件内容合并回主数据库。
+
+        Args:
+            db_file: 数据库文件路径
+            mode: checkpoint 模式:
+                - PASSIVE (默认): 不阻塞, 只合并已完成的帧
+                - NORMAL: 合并到最新, 可能短暂阻塞写入
+                - TRUNCATE: 完全合并并回收 WAL 空间 (退出时用)
+                - RESTART: 阻塞所有读写直到完成
+
+        Returns:
+            是否成功执行
+        """
+        try:
+            conn = sqlite3.connect(db_file, timeout=5)
+            try:
+                result = conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+                logger.debug(
+                    f"[Checkpoint] {db_file} mode={mode} "
+                    f"checkpointed={result[0]}, backlog={result[1]}"
+                )
+                return True
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(f"[Checkpoint] 失败 ({mode}): {e}")
+            return False
 
     def get_raw(self, db_file: str = DB_FILE,
                 timeout: int = 10) -> sqlite3.Connection:

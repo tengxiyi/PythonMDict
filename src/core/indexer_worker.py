@@ -10,9 +10,10 @@ import time
 
 from PySide6.QtCore import QThread, Signal
 
-from .config import DB_FILE, MDD_DB_FILE
+from .config import DB_FILE, MDD_DB_FILE, IMPORT_MDX_BATCH_SIZE, IMPORT_MDD_BATCH_SIZE
 from .utils import pre_process_entry_content, space_cjk, RE_HTML_TAG, RE_WHITESPACE
 from .logger import logger
+from .connection_pool import pool
 
 
 class IndexerWorker(QThread):
@@ -74,7 +75,11 @@ class IndexerWorker(QThread):
             # 导入MDD资源
             if mdd_paths:
                 self.process_mdd(mdd_paths, did, name)
-            
+
+            # 导入完成后触发 WAL checkpoint，合并大量写入产生的 WAL 文件
+            pool.checkpoint(mode="TRUNCATE")
+            logger.info(f"{name}: 导入完成，WAL 已合并")
+
             result = {'name': name, 'count': count, 'path': p}
             self.finished.emit(result)
             
@@ -137,8 +142,13 @@ class IndexerWorker(QThread):
 
         try:
             with sqlite3.connect(DB_FILE, timeout=30) as conn:
+                # 导入专用 PRAGMA：最大化写入吞吐量
                 conn.execute("PRAGMA journal_mode=WAL;")
                 conn.execute("PRAGMA synchronous=OFF;")
+                conn.execute("PRAGMA cache_size=-50000;")     # 导入时用 ~100MB 缓存（比读连接更大）
+                conn.execute("PRAGMA mmap_size=536870912;")    # 512MB 内存映射
+                conn.execute("PRAGMA temp_store=MEMORY;")      # 临时表/排序使用内存
+
                 conn.execute("BEGIN TRANSACTION")
 
                 try:
@@ -180,10 +190,10 @@ class IndexerWorker(QThread):
 
                     total_count += 1
 
-                    # 更频繁地报告进度（每1000条或每10%更新一次）
-                    if len(batch_std) >= 2000 or total_count % 500 == 0:
+                    # 更频繁地报告进度（每批量写入或每1000条进度更新）
+                    if len(batch_std) >= IMPORT_MDX_BATCH_SIZE or total_count % 1000 == 0:
                         try:
-                            if len(batch_std) >= 2000:
+                            if len(batch_std) >= IMPORT_MDX_BATCH_SIZE:
                                 conn.executemany(
                                     "INSERT INTO standard_entries VALUES (?,?,?,?)",
                                     batch_std
@@ -239,7 +249,6 @@ class IndexerWorker(QThread):
 
         batch = []
         count = 0
-        BATCH_SIZE = 500
 
         try:
             from readmdict import MDD
@@ -250,8 +259,11 @@ class IndexerWorker(QThread):
 
         try:
             with sqlite3.connect(MDD_DB_FILE, timeout=30) as conn:
+                # 导入专用 PRAGMA
                 conn.execute("PRAGMA journal_mode=WAL;")
                 conn.execute("PRAGMA synchronous=OFF;")
+                conn.execute("PRAGMA temp_store=MEMORY;")
+
                 conn.execute("BEGIN TRANSACTION")
 
                 conn.execute("DELETE FROM resources WHERE dict_id=?", (did,))
@@ -281,13 +293,13 @@ class IndexerWorker(QThread):
                         except Exception:
                             continue
 
-                        if len(batch) >= BATCH_SIZE:
+                        if len(batch) >= IMPORT_MDD_BATCH_SIZE:
                             conn.executemany(
                                 "INSERT OR IGNORE INTO resources VALUES (?,?,?)",
                                 batch
                             )
                             batch = []
-                            count += BATCH_SIZE
+                            count += IMPORT_MDD_BATCH_SIZE
                             if count % 2000 == 0:
                                 self.progress.emit(count, max(count, 1000), f"{name}: cached {count} resources")
 

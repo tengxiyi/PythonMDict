@@ -141,6 +141,16 @@ def main():
     # 进入事件循环
     exit_code = app.exec()
     logger.info(f"应用退出，退出码: {exit_code}")
+
+    # 退出时执行 WAL checkpoint (TRUNCATE)，将数据合并回主数据库并回收空间
+    try:
+        from src.core.connection_pool import pool
+        pool.checkpoint(mode="TRUNCATE")
+        pool.checkpoint(pool._mdd_pool._db_file, mode="TRUNCATE")
+        logger.info("WAL checkpoint 完成 (TRUNCATE)")
+    except Exception as e:
+        logger.debug(f"退出时 checkpoint 跳过: {e}")
+
     sys.exit(exit_code)
 
 

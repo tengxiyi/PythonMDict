@@ -28,8 +28,12 @@ CLIPBOARD_MAX_LEN = 40
 SEARCH_BATCH_FIRST = 3  # 首批返回数量（快速响应）
 
 # 索引批处理大小
-INDEXER_BATCH_SIZE_STD = 2000  # 词条批量写入大小
+INDEXER_BATCH_SIZE_STD = 2000  # 词条批量写入大小 (旧值, 保留兼容)
 INDEXER_BATCH_SIZE_MDD = 500    # MDD资源批量写入大小
+
+# 导入优化：MDX 批量大小 (增大减少 commit 频率)
+IMPORT_MDX_BATCH_SIZE = 5000
+IMPORT_MDD_BATCH_SIZE = 1000    # MDD 资源批量大小 (增大)
 
 # 分析器限制
 ANALYZER_MAX_RESULTS = 1000      # 最大返回结果数
