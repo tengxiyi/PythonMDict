@@ -1,27 +1,39 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-极客词典Pro (GeekDictionary) - 应用程序入口点
+极客词典Pro (GeekDictionary) v3.0 - 应用程序入口点
 
-重构后：此文件只负责启动应用，所有业务逻辑已拆分到 src/ 目录下
+重构历程:
+  Phase 1: 模块拆分 — 将 main.py(3507行) + backend.py(1178行) 拆分为 src/ 下 33+ 个模块
+  Phase 2: 功能优化 — 每日一词重构 / 闪卡全面升级 / 例句质量修复 / 出处引用
 
 项目结构:
-├── main.py              # 入口文件 (本文件)
-├── backend.py           # 保留向后兼容的导入重导出
+├── main_new.py          # 入口文件 (本文件, ~136行)
+├── backend.py           # 向后兼容的导入重导出
 ├── src/
-│   ├── __init__.py      # 包初始化
 │   ├── core/            # 核心业务逻辑
-│   │   ├── config.py    # 配置常量
-│   │   ├── logger.py    # 日志系统
-│   │   ├── database.py  # 数据库管理
-│   │   ├── utils.py     # 工具函数
-│   │   └── *_worker.py  # 各类工作线程
+│   │   ├── config.py        # 配置常量 (DB_FILE, EBBINGHAUS_INTERVALS 等)
+│   │   ├── logger.py        # 统一日志系统 (控制台+文件双输出)
+│   │   ├── database.py      # 数据库管理 (SQLite CRUD)
+│   │   ├── utils.py         # 工具集 (clean_sentence_text, STOP_WORDS, VALID_WORD 等)
+│   │   ├── quiz_worker.py   # 测验生成 (干扰项筛选+例句提取+词条头过滤)
+│   │   ├── search_worker.py # 搜索线程
+│   │   ├── indexer_worker.py# MDX导入索引
+│   │   ├── analyzer_worker.py  # 词频分析
+│   │   └── news_workers.py    # RSS新闻
 │   └── ui/              # UI层
-│       ├── main_window.py    # 主窗口
-│       ├── theme_manager.py  # 主题管理
-│       ├── widgets/          # 自定义控件
-│       ├── handlers/         # 协议处理器
-│       └── pages/            # 功能页面
+│       ├── main_window.py      # 主窗口框架
+│       ├── theme_manager.py    # 主题管理器
+│       ├── widgets/            # 自定义控件 (sidebar, clipboard_watcher, mdd_cache 等)
+│       ├── handlers/           # URL协议处理 (mdict://)
+│       └── pages/              # 功能页面
+│           ├── search_page.py      # 查词 + 每日一词 (含日期种子+停用词过滤)
+│           ├── vocab_page.py       # 单词本 + 闪卡学习 (含出处引用+我不会按钮)
+│           ├── settings_page.py    # 设置
+│           ├── theme_page.py       # 主题选择
+│           ├── dict_manager_page.py# 词典管理
+│           ├── history_page.py     # 历史记录
+│           └── text_analyzer_page.py # 词频分析
 """
 
 import sys

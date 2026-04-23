@@ -1,4 +1,4 @@
-# 极客词典Pro - 模块拆分与日志增强说明
+# 极客词典Pro - 重构与优化记录
 
 ## 重构概述
 
@@ -8,7 +8,7 @@
 
 ```
 GeekDictionary/
-├── main_new.py                    # 🆕 简洁入口文件 (~120行)
+├── main_new.py                    # 🆕 简洁入口文件 (~136行)
 ├── backend.py                     # 保留（向后兼容重导出）
 │
 ├── src/                           # 🆕 核心代码目录
@@ -21,10 +21,10 @@ GeekDictionary/
 │   │   ├── config.py            # 全局配置 (1.3KB)
 │   │   ├── logger.py            # 日志系统 (2.5KB)
 │   │   ├── database.py          # 数据库管理 (5.2KB)
-│   │   ├── utils.py             # 工具函数集 (10.5KB)
+│   │   ├── utils.py             # 工具函数集 (10.5KB) — 含STOP_WORDS等
 │   │   ├── search_worker.py     # 搜索线程 (6.9KB)
 │   │   ├── indexer_worker.py    # 导入索引线程 (11.3KB)
-│   │   ├── quiz_worker.py       # 测验生成线程 (6.7KB)
+│   │   ├── quiz_worker.py       # 测验生成线程 (~9KB, 已优化)
 │   │   ├── analyzer_worker.py   # 词频分析线程 (3.9KB)
 │   │   └── news_workers.py      # RSS新闻相关线程 (8.9KB)
 │   │
@@ -48,16 +48,16 @@ GeekDictionary/
 │       │
 │       └── pages/              # 功能页面
 │           ├── __init__.py
-│           ├── search_page.py      # 查词页 (38.4KB) - 最大页面
-│           ├── vocab_page.py       # 单词本 (14.3KB)
+│           ├── search_page.py      # 查词页 (~38KB) — 含每日一词
+│           ├── vocab_page.py       # 单词本/闪卡 (~15KB, 已优化)
 │           ├── settings_page.py    # 设置页 (3.1KB)
 │           ├── theme_page.py       # 主题选择 (4KB)
 │           ├── dict_manager_page.py# 词典管理 (6.5KB)
 │           ├── history_page.py     # 历史记录 (8.6KB)
 │           └── text_analyzer_page.py # 词频分析 (12.8KB)
 │
-├── requirements.txt               # 🆕 Python依赖清单
-├── .gitignore                    # 🆕 Git忽略规则
+├── requirements.txt               # Python依赖清单
+├── .gitignore                    # Git忽略规则
 └── REFACTORING.md                # 本文件
 ```
 
@@ -161,9 +161,84 @@ pip install -r requirements.txt
 - [ ] 音频播放正常
 - [ ] MDD资源（图片/音频）加载正常
 
+## Phase 2: 功能优化（已完成 ✅）
+
+> 本阶段聚焦于**数据质量**和**用户体验**的深度优化，涉及每日一词、闪卡/测验系统、例句质量三大模块。
+
+### 2.1 每日一词重构 (search_page.py)
+
+| 改动项 | 说明 |
+|--------|------|
+| **单词合法性过滤** | SQL层预过滤 (length + GLOB) + Python层正则校验 (`VALID_WORD` 模式) |
+| **日期确定性种子** | 基于 `MD5(date.today())` 的哈希种子，同一天内始终返回相同单词，跨天自动切换 |
+| **停用词排除** | 使用 `STOP_WORDS` (~150个常见功能词) 过滤掉无学习价值的词 |
+
+**技术要点**: 相对导入使用三级跳转 `from ...core.utils import STOP_WORDS`
+
+---
+
+### 2.2 闪卡/测验系统全面升级 (quiz_worker.py + vocab_page.py)
+
+#### 2.2.1 干扰项质量提升 (`get_random_words()` 完全重写)
+
+**改进前问题**: 干扰项出现 `flecks'`, `newsworthinesses`, `gleamings` 等低质量词汇
+
+**新增过滤条件**:
+- 长度相似性筛选 (±4字符, 通过 `target_len` 参数)
+- 正则纯字母校验: `^[a-z]+$|^[A-Z][a-z]+$`
+- STOP_WORDS 停用词排除
+- SQL层 GLOB 预过滤减少无效查询
+- 尝试次数从 20 提升到 30
+- 兜底备用词改为通用常见词 (example, method, result...)
+
+#### 2.2.2 例句质量修复 (`generate_quiz_data()` 大幅改造)
+
+**已解决的问题**:
+
+| 问题现象 | 根因 | 修复方案 |
+|----------|------|----------|
+| 显示词典词条头而非句子 | 断句取到 inframe 区域开头的词条元数据 | 新增 `DICT_HEADER_PATTERNS` 排除模式集 |
+| 中英文语义错配 | 句子中夹杂大量中文释义/例句 | 增加英文字符占比 >50% 的过滤 |
+| **全局"未找到语境语句"** | `dict_info` 表列名错误: 用了 `d.dict_name`(不存在) 而非正确列名 `d.name`, 导致SQL语法错误被 `except Exception` 静默吞掉 → 全部返回 None | 修正 JOIN 列名为 `d.name` |
+
+**词典头排除模式 (9种)**:
+```python
+DICT_HEADER_PATTERNS = [
+    r'[①②③④⑤⑥⑦⑧⑨⑩]',     # 圈号义项标记
+    r'[\^⁰¹²³⁴⁵⁶⁷⁸⁹]',       # ASCII/Unicode上标数字
+    r'\b(adj\|adv\|n\|v\|...)\.\s',  # 词性缩写+空格
+    r'=\s*$',                  # 以等号结尾
+    r'/\s*[^\s/]{2,}\s*/',    # IPA斜杠音标 (允许内部空格)
+    r'\[\s*[^\s\]]{2,}\s*\]', # 方括号音标
+    r'\bnoun\b.*?\bverb\b...',# 多词性连排
+    r"'[a-z]+\s+(noun\|...)", # 引号单词+词性
+]
+```
+
+#### 2.2.3 UI交互优化 (vocab_page.py)
+
+| 新增/改动 | 说明 |
+|-----------|------|
+| **出处引用标签** 📖 | 例句右侧显示引用标签，hover tooltip 显示词典名，点击跳转到查词页 |
+| **"我不会"按钮** 💡 | 点击后禁用所有选项、翻到背面评分，帮助用户诚实面对知识盲区 |
+| **跳过卡片行为优化** | 跳过时按 hard 处理（维持当前阶段 +2 XP），更新数据库复习间隔 |
+| **按钮文案更新** | "💡 我不会，显示释义" 更直观 |
+
+**出处标签实现细节**:
+```python
+self.lbl_source = QLabel("📖")
+self.lbl_source.setCursor(Qt.PointingHandCursor)
+self.lbl_source.setStyleSheet("font-size:12px;color:var(--meta);background:var(--hover);...")
+self.lbl_source.mousePressEvent = self._on_source_clicked
+# hover tooltip: f"例句来源: {dict_name}"
+# click action: self.window().switch_to_search(word)
+```
+
+---
+
 ## 后续建议
 
-### Phase 2: 进一步优化
+### Phase 3: 进一步优化方向
 
 1. **类型注解**
    ```python
@@ -188,13 +263,20 @@ pip install -r requirements.txt
 
 ## 文件统计
 
-| 指标 | 重构前 | 重构后 |
-|------|--------|--------|
-| 最大单文件行数 | 3507行 | 384行 (search_page.py) |
-| 核心文件数 | 2个 | 33个模块 |
-| 有日志覆盖的函数 | ~10% | ~95% |
-| 配置集中度 | 分散 | 100%集中 |
-| 可独立测试的类 | 0个 | 18+个 |
+| 指标 | 重构前 | Phase 1 后 | Phase 2 后 (当前) |
+|------|--------|-----------|------------------|
+| 最大单文件行数 | 3507行 | 384行 (search_page.py) | ~38KB (search_page.py) |
+| 核心文件数 | 2个 | 33个模块 | 34个模块 |
+| 有日志覆盖的函数 | ~10% | ~95% | ~95% |
+| 配置集中度 | 分散 | 100%集中 | 100%集中 |
+| 可独立测试的类 | 0个 | 18+个 | 20+个 |
+
+## 关键提交记录
+
+| 提交 | 内容 |
+|------|------|
+| `8147fd0` | 每日一词重构: 日期种子 + 停用词过滤 + 合法性校验 |
+| `6e1d484` | 闪卡优化: 词条头排除(IPA音标/上标/多词性) + 例句质量 + 出处引用 |
 
 ## 技术栈依赖
 
