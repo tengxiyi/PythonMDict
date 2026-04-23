@@ -433,13 +433,28 @@ class VocabPage(QWidget):
         self.lbl_fc_word.setStyleSheet("font-size:28px;font-weight:bold;color:var(--primary);")
         ql.addWidget(self.lbl_fc_word)
 
+        # 例句区域（句子 + 出处标签）
+        self.sentence_container = QWidget()
+        sl_h = QHBoxLayout(self.sentence_container)
+        sl_h.setContentsMargins(16, 8, 4, 8)
+
         self.lbl_sentence = QLabel("Loading...")
         self.lbl_sentence.setWordWrap(True)
-        self.lbl_sentence.setAlignment(Qt.AlignCenter)
-        self.lbl_sentence.setStyleSheet(
-            "font-size:18px;font-style:italic;color:var(--text);padding:16px;"
+        self.lbl_sentence.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.lbl_sentence.setStyleSheet("font-size:18px;font-style:italic;color:var(--text);")
+        sl_h.addWidget(self.lbl_sentence, stretch=1)
+
+        # 出处标签（可交互）
+        self.lbl_source = QLabel("")
+        self.lbl_source.setCursor(Qt.PointingHandCursor)
+        self.lbl_source.setStyleSheet(
+            "font-size:12px;color:var(--meta);background:var(--hover);"
+            "padding:2px 8px;border-radius:10px;font-weight:bold;"
         )
-        ql.addWidget(self.lbl_sentence)
+        self.lbl_source.setToolTip("")  # hover 显示词典名
+        self.lbl_source.mousePressEvent = self._on_source_clicked
+        sl_h.addWidget(self.lbl_source)
+        ql.addWidget(self.sentence_container)
 
         self.grid_options = QGridLayout()
         self.option_btns = []
@@ -453,9 +468,9 @@ class VocabPage(QWidget):
         ql.addLayout(self.grid_options)
 
         h_actions = QHBoxLayout()
-        self.btn_show_answer = QPushButton("💡 我不会 / 显示释义")
+        self.btn_show_answer = QPushButton("💡 我不会，显示释义")
         self.btn_show_answer.setFlat(True)
-        self.btn_show_answer.clicked.connect(lambda: self.reveal_answer(False))
+        self.btn_show_answer.clicked.connect(self.on_give_up)
         h_actions.addWidget(self.btn_show_answer)
 
         self.btn_skip = QPushButton("⏭️ 跳过此词")
@@ -620,18 +635,34 @@ class VocabPage(QWidget):
         if data:
             self.lbl_sentence.setText(data['question'])
             self.lbl_fc_word.setVisible(False)
+            # 设置出处标签
+            dict_name = data.get('dict_name', '')
+            if dict_name:
+                self.lbl_source.setText("📖")
+                self.lbl_source.setToolTip(f"例句来源: {dict_name}")
+                self.lbl_source.setVisible(True)
+            else:
+                self.lbl_source.setVisible(False)
+
             options = data['options']
             for i, btn in enumerate(self.option_btns):
                 btn.setText(options[i])
                 btn.setEnabled(True)
                 btn.setProperty("is_correct", options[i] == data['answer'])
-            self.btn_show_answer.setText("💡 我不会 / 显示释义")
+            self.btn_show_answer.setText("💡 我不会，显示释义")
         else:
             self.lbl_sentence.setText("(未找到语境语句)")
             self.lbl_fc_word.setVisible(True)
+            self.lbl_source.setVisible(False)
             for btn in self.option_btns:
                 btn.setVisible(False)
             self.btn_show_answer.setText("💡 显示释义")
+
+    def _on_source_clicked(self, event):
+        """点击例句出处标签 -> 跳转到查词页面"""
+        if self.current_card and hasattr(self.window(), 'switch_to_search'):
+            word = self.current_card[0]
+            self.window().switch_to_search(word)
 
     def check_answer(self, idx: int):
         """检查答案"""
@@ -652,6 +683,13 @@ class VocabPage(QWidget):
             FloatingText(self, text="再想想", color="#c62828",
                          pos=btn.mapTo(self, QPoint(btn.width() // 2, 0)))
 
+    def on_give_up(self):
+        """点击'我不会'：标记为未答对，直接翻到背面评分"""
+        # 禁用所有选项按钮，表示放弃作答
+        for btn in self.option_btns:
+            btn.setEnabled(False)
+        self.reveal_answer(False)
+
     def reveal_answer(self, was_correct: bool):
         """展示释义（切到背面）"""
         self.fc_stack.setCurrentIndex(2)
@@ -663,7 +701,20 @@ class VocabPage(QWidget):
             self.lbl_result.setStyleSheet("color:var(--text);font-size:18px;")
 
     def skip_card(self):
-        """跳过当前卡片"""
+        """跳过当前卡片（按'记得模糊'处理，维持当前阶段）"""
+        if self.current_card:
+            w, stage, current_xp = self.current_card
+            new_xp = (current_xp or 0) + 2
+            next_t = time.time() + EBBINGHAUS_INTERVALS[min(stage, len(EBBINGHAUS_INTERVALS) - 1)]
+            try:
+                with sqlite3.connect(DB_FILE) as conn:
+                    conn.execute(
+                        "UPDATE vocabulary SET review_stage=?, next_review_time=?, xp=? WHERE word=?",
+                        (stage, next_t, new_xp, w)
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"更新跳过卡片状态失败({w}): {e}")
         self.session_results["skipped"] += 1
         self.next_card()
 
