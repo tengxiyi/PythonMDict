@@ -54,8 +54,16 @@ class DatabaseManager:
                     length INTEGER
                 )
             """)
+            # 单列索引（向后兼容）
             conn.execute("CREATE INDEX IF NOT EXISTS idx_word ON standard_entries(word COLLATE NOCASE)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dict ON standard_entries(dict_id)")
+
+            # 复合索引：覆盖高频查询 WHERE word=? AND dict_id=?
+            # 同时可服务于 word 单列查询（前缀匹配）和 LIKE 前缀扫描
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_word_dict "
+                "ON standard_entries(word COLLATE NOCASE, dict_id)"
+            )
             
             # FTS5 全文检索表
             conn.execute(

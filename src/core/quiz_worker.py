@@ -18,6 +18,7 @@ from .utils import (
     STOP_WORDS
 )
 from .logger import logger
+from .connection_pool import pool
 
 
 class QuizWorker(QThread):
@@ -39,25 +40,25 @@ class QuizWorker(QThread):
         content = None
         dict_name = None
         try:
-            with sqlite3.connect(DB_FILE) as conn:
-                if self.dict_id:
-                    row = conn.execute(
-                        "SELECT content, d.name FROM standard_entries e "
-                        "JOIN dict_info d ON e.dict_id = d.id "
-                        "WHERE e.word=? AND e.dict_id=?",
-                        (self.word, self.dict_id)
-                    ).fetchone()
-                else:
-                    row = conn.execute(
-                        "SELECT content, d.name FROM standard_entries e "
-                        "JOIN dict_info d ON e.dict_id = d.id "
-                        "WHERE e.word=? LIMIT 1",
-                        (self.word,)
-                    ).fetchone()
-                
-                if row:
-                    content = row[0]
-                    dict_name = row[1]
+            conn = pool.get()
+            if self.dict_id:
+                row = conn.execute(
+                    "SELECT content, d.name FROM standard_entries e "
+                    "JOIN dict_info d ON e.dict_id = d.id "
+                    "WHERE e.word=? AND e.dict_id=?",
+                    (self.word, self.dict_id)
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT content, d.name FROM standard_entries e "
+                    "JOIN dict_info d ON e.dict_id = d.id "
+                    "WHERE e.word=? LIMIT 1",
+                    (self.word,)
+                ).fetchone()
+
+            if row:
+                content = row[0]
+                dict_name = row[1]
         except Exception as e:
             logger.error(f"获取测验词条失败({self.word}): {e}")
 
@@ -108,8 +109,8 @@ def get_random_words(count: int = 3, exclude_word: str = "",
     max_attempts = 30  # 增加尝试次数以提高质量
 
     try:
-        with sqlite3.connect(DB_FILE) as conn:
-            while len(candidates) < count and attempts < max_attempts:
+        conn = pool.get()
+        while len(candidates) < count and attempts < max_attempts:
                 # SQL 层面预过滤：长度范围 + 英文字母开头
                 min_len = max(2, target_len - 4) if target_len else 2
                 max_len = min(20, target_len + 4) if target_len else 20

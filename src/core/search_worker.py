@@ -12,6 +12,7 @@ from PySide6.QtCore import QThread, Signal
 from .config import DB_FILE
 from .utils import process_entry_task, space_cjk, get_opencc
 from .logger import logger
+from .connection_pool import pool
 from concurrent.futures import ThreadPoolExecutor
 
 # 全局线程池复用
@@ -45,23 +46,22 @@ class SearchWorker(QThread):
         has_cjk = any('\u4e00' <= c <= '\u9fff' for c in q)
 
         try:
-            with sqlite3.connect(DB_FILE, timeout=10) as conn:
-                conn.execute("PRAGMA query_only=1;")
-                conn.execute("PRAGMA mmap_size = 536870912;")
-                cursor = conn.cursor()
+            # 使用连接池复用线程本地连接（避免每次搜索都新建连接 ~5-20ms）
+            conn = pool.get()
+            cursor = conn.cursor()
 
-                # 获取词典映射
-                cursor.execute("SELECT id, name, priority, path FROM dict_info ORDER BY priority DESC")
-                dict_map = {d[0]: {'name': d[1], 'pri': d[2], 'path': d[3]} for d in cursor.fetchall()}
+            # 获取词典映射
+            cursor.execute("SELECT id, name, priority, path FROM dict_info ORDER BY priority DESC")
+            dict_map = {d[0]: {'name': d[1], 'pri': d[2], 'path': d[3]} for d in cursor.fetchall()}
 
-                # 英文：仅精确匹配（大小写不敏感）
-                if not has_cjk:
-                    cursor.execute(
-                        "SELECT word, NULL, dict_id, 1 FROM standard_entries WHERE word = ? COLLATE NOCASE",
-                        (q,)
-                    )
-                    raw_candidates.extend(cursor.fetchall())
-                else:
+            # 英文：仅精确匹配（大小写不敏感）
+            if not has_cjk:
+                cursor.execute(
+                    "SELECT word, NULL, dict_id, 1 FROM standard_entries WHERE word = ? COLLATE NOCASE",
+                    (q,)
+                )
+                raw_candidates.extend(cursor.fetchall())
+            else:
                     # 中文：精确 + FTS全文检索 + 简繁转换
                     cursor.execute("SELECT word, NULL, dict_id, 1 FROM standard_entries WHERE word = ?", (q,))
                     raw_candidates.extend(cursor.fetchall())
@@ -124,15 +124,15 @@ class SearchWorker(QThread):
 
             if r_blob is None:
                 try:
-                    with sqlite3.connect(DB_FILE) as conn:
-                        row = conn.execute(
-                            "SELECT content FROM standard_entries WHERE word=? AND dict_id=?",
-                            (r_word, d_id)
-                        ).fetchone()
-                        if row:
-                            r_blob = row[0]
-                        else:
-                            continue
+                    # 复用同一连接，无需新建（消除第二次连接开销）
+                    row = conn.execute(
+                        "SELECT content FROM standard_entries WHERE word=? AND dict_id=?",
+                        (r_word, d_id)
+                    ).fetchone()
+                    if row:
+                        r_blob = row[0]
+                    else:
+                        continue
                 except Exception as e:
                     logger.debug(f"读取词条失败({r_word}, did={d_id}): {e}")
                     continue
@@ -168,13 +168,13 @@ class SearchWorker(QThread):
         """获取搜索建议词"""
         if len(query) > 2 and not has_cjk:
             try:
-                with sqlite3.connect(DB_FILE) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT word FROM standard_entries WHERE word LIKE ? COLLATE NOCASE LIMIT 5",
-                        (f"{query[:2]}%",)
-                    )
-                    return [r[0] for r in cursor.fetchall()]
+                conn = pool.get()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT word FROM standard_entries WHERE word LIKE ? COLLATE NOCASE LIMIT 5",
+                    (f"{query[:2]}%",)
+                )
+                return [r[0] for r in cursor.fetchall()]
             except Exception as e:
                 logger.debug(f"获取建议词失败: {e}")
         return []

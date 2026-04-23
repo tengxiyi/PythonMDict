@@ -29,6 +29,7 @@ from PySide6.QtGui import QDesktopServices
 
 from ...core.config import DB_FILE
 from ...core.logger import logger
+from ...core.connection_pool import pool
 from ..widgets.mdd_cache import MDDCacheManager
 
 
@@ -50,8 +51,8 @@ def _get_dict_dir(dict_id: int) -> str | None:
             if dict_id in DICT_DIR_CACHE:
                 return DICT_DIR_CACHE[dict_id]
 
-        with sqlite3.connect(DB_FILE, timeout=5) as conn:
-            row = conn.execute("SELECT path FROM dict_info WHERE id=?", (dict_id,)).fetchone()
+        conn = pool.get()
+        row = conn.execute("SELECT path FROM dict_info WHERE id=?", (dict_id,)).fetchone()
         dict_dir = os.path.dirname(row[0]) if row and row[0] else None
         dict_dir = os.path.normpath(dict_dir) if dict_dir else None
 
@@ -235,11 +236,11 @@ def play_audio_from_mdict(play_url: str) -> bool:
     # root / 0.0.0.x 视为全库查找
     if dict_id_str == "root" or dict_id_str.startswith("0.0.0."):
         try:
-            with sqlite3.connect(DB_FILE) as conn:
-                target_ids = [
-                    r[0] for r in
-                    conn.execute("SELECT id FROM dict_info ORDER BY priority ASC").fetchall()
-                ]
+            conn = pool.get()
+            target_ids = [
+                r[0] for r in
+                conn.execute("SELECT id FROM dict_info ORDER BY priority ASC").fetchall()
+            ]
         except Exception as e:
             logger.error(f"获取词典ID列表失败: {e}")
             target_ids = []
@@ -399,13 +400,13 @@ class MdictSchemeHandler(QWebEngineUrlSchemeHandler):
                         # 纯数字ID: 查找同名CSS物理文件
                         dict_id = int(payload)
                         css_path = None
-                        with sqlite3.connect(DB_FILE, timeout=5) as conn:
-                            row = conn.execute(
-                                "SELECT path FROM dict_info WHERE id=?",
-                                (dict_id,)
-                            ).fetchone()
-                            if row and row[0]:
-                                css_path = row[0][:-4] + ".css"
+                        conn = pool.get()
+                        row = conn.execute(
+                            "SELECT path FROM dict_info WHERE id=?",
+                            (dict_id,)
+                        ).fetchone()
+                        if row and row[0]:
+                            css_path = row[0][:-4] + ".css"
 
                         if css_path and os.path.exists(css_path):
                             with open(css_path, "rb") as f:
@@ -419,38 +420,38 @@ class MdictSchemeHandler(QWebEngineUrlSchemeHandler):
                             rest = parts[1]
                             if rest == "__style.css":
                                 css_path = None
-                                with sqlite3.connect(DB_FILE, timeout=5) as conn:
-                                    row = conn.execute(
-                                        "SELECT path FROM dict_info WHERE id=?",
-                                        (dict_id,)
-                                    ).fetchone()
-                                    if row and row[0]:
-                                        css_path = row[0][:-4] + ".css"
-                                
+                                conn = pool.get()
+                                row = conn.execute(
+                                    "SELECT path FROM dict_info WHERE id=?",
+                                    (dict_id,)
+                                ).fetchone()
+                                if row and row[0]:
+                                    css_path = row[0][:-4] + ".css"
+
                                 if css_path and os.path.exists(css_path):
                                     with open(css_path, "rb") as f:
                                         reply_data(b"text/css", f.read())
                                     return
-                                
+
                                 reply_empty(b"text/css")
                                 return
 
                             elif rest == "__script.js":
                                 # 加载词典自带JS文件（如OALDPE设置按钮交互脚本）
                                 js_path = None
-                                with sqlite3.connect(DB_FILE, timeout=5) as conn:
-                                    row = conn.execute(
-                                        "SELECT path FROM dict_info WHERE id=?",
-                                        (dict_id,)
-                                    ).fetchone()
-                                    if row and row[0]:
-                                        js_path = row[0][:-4] + ".js"
-                                
+                                conn = pool.get()
+                                row = conn.execute(
+                                    "SELECT path FROM dict_info WHERE id=?",
+                                    (dict_id,)
+                                ).fetchone()
+                                if row and row[0]:
+                                    js_path = row[0][:-4] + ".js"
+
                                 if js_path and os.path.exists(js_path):
                                     with open(js_path, "rb") as f:
                                         reply_data(b"application/javascript", f.read())
                                     return
-                                
+
                                 # JS不存在则返回空，不报错（很多词典没有独立JS文件）
                                 reply_empty(b"application/javascript")
                                 return
@@ -458,19 +459,19 @@ class MdictSchemeHandler(QWebEngineUrlSchemeHandler):
                             elif rest == "__jquery.js":
                                 # 加载词典自带的jQuery（如OALDPE的 oaldpe-jquery.js）
                                 jq_path = None
-                                with sqlite3.connect(DB_FILE, timeout=5) as conn:
-                                    row = conn.execute(
-                                        "SELECT path FROM dict_info WHERE id=?",
-                                        (dict_id,)
-                                    ).fetchone()
-                                    if row and row[0]:
-                                        base = os.path.splitext(row[0])[0]
-                                        # 常见命名: basename-jquery.js 或 jquery.js
-                                        for candidate in [base + "-jquery.js", os.path.join(os.path.dirname(base), "jquery.js")]:
-                                            if os.path.exists(candidate):
-                                                jq_path = candidate
-                                                break
-                                
+                                conn = pool.get()
+                                row = conn.execute(
+                                    "SELECT path FROM dict_info WHERE id=?",
+                                    (dict_id,)
+                                ).fetchone()
+                                if row and row[0]:
+                                    base = os.path.splitext(row[0])[0]
+                                    # 常见命名: basename-jquery.js 或 jquery.js
+                                    for candidate in [base + "-jquery.js", os.path.join(os.path.dirname(base), "jquery.js")]:
+                                        if os.path.exists(candidate):
+                                            jq_path = candidate
+                                            break
+
                                 if jq_path and os.path.exists(jq_path):
                                     with open(jq_path, "rb") as f:
                                         reply_data(b"application/javascript", f.read())
@@ -575,8 +576,8 @@ class MdictSchemeHandler(QWebEngineUrlSchemeHandler):
             target_ids = []
             if dict_id_str == "root" or dict_id_str.startswith("0.0.0."):
                 try:
-                    with sqlite3.connect(DB_FILE) as conn:
-                        target_ids = [
+                    conn = pool.get()
+                    target_ids = [
                             r[0] for r in
                             conn.execute(
                                 "SELECT id FROM dict_info ORDER BY priority ASC"
@@ -598,8 +599,8 @@ class MdictSchemeHandler(QWebEngineUrlSchemeHandler):
                 except Exception as e:
                     logger.warning(f"解析dict_id失败[{dict_id_str}]: {e}, 使用全库搜索")
                     try:
-                        with sqlite3.connect(DB_FILE) as conn:
-                            target_ids = [
+                        conn = pool.get()
+                        target_ids = [
                                 r[0] for r in
                                 conn.execute(
                                     "SELECT id FROM dict_info ORDER BY priority ASC"
