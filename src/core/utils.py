@@ -250,6 +250,20 @@ def process_entry_task(args: tuple) -> dict:
 
 # ============== 网络请求 ==============
 
+# 全局 SSL 上下文复用（避免每次请求重建，打包后 OpenSSL 初始化很慢）
+_ssl_context = None
+
+def _get_ssl_context():
+    """获取/创建全局 SSL 上下文（懒加载+单例）"""
+    global _ssl_context
+    if _ssl_context is None:
+        import ssl
+        _ssl_context = ssl.create_default_context()
+        _ssl_context.check_hostname = False
+        _ssl_context.verify_mode = ssl.CERT_NONE
+    return _ssl_context
+
+
 def fetch_url_content(url: str, timeout: int = 5) -> Optional[bytes]:
     """
     通用HTTP下载函数（支持SSL和gzip解压）
@@ -261,17 +275,16 @@ def fetch_url_content(url: str, timeout: int = 5) -> Optional[bytes]:
     Returns:
         下载的字节数据或None
     """
-    import ssl
     import gzip
     
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = _get_ssl_context()
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                           'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Encoding': 'gzip',  # 显式声明支持gzip
+            'Connection': 'close',
         }
         try:
             req = urllib.request.Request(url, headers=headers)

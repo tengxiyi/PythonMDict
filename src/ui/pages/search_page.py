@@ -389,8 +389,12 @@ class SearchSplitPage(QWidget):
             if not query:
                 query = "latest"
 
-            # 安全终止可能仍在运行的前一个worker
+            # 安全终止可能仍在运行的前一个worker（先断开信号防止竞态）
             if hasattr(self, 'news_worker') and self.news_worker is not None:
+                try:
+                    self.news_worker.news_ready.disconnect(self.render_news)
+                except Exception:
+                    pass
                 try:
                     self.news_worker.quit()
                     self.news_worker.wait(1000)
@@ -400,9 +404,15 @@ class SearchSplitPage(QWidget):
 
             self.web_news.setHtml("<h3>正在加载新闻...</h3>")
             self.news_worker = NewsWorker(query)
+            # 使用 unique 连接方式防止重复绑定
             self.news_worker.news_ready.connect(self.render_news)
             self._worker_ref = self.news_worker
+
             def _cleanup():
+                try:
+                    self._worker_ref.news_ready.disconnect(self.render_news)
+                except Exception:
+                    pass
                 self._worker_ref = None
             self.news_worker.finished.connect(_cleanup)
             self.news_worker.start()
