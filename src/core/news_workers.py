@@ -237,6 +237,7 @@ class NewsWorker(QThread):
         try:
             data = fetch_url_content(src['url'], timeout=self._per_source_timeout)
             if not data:
+                logger.warning(f"RSS源 [{src['name']}] 下载返回空数据")
                 return []
 
             try:
@@ -245,6 +246,7 @@ class NewsWorker(QThread):
                 xml_str = data.decode('gbk', 'ignore').strip()
 
             if not xml_str.startswith('<'):
+                logger.warning(f"RSS源 [{src['name']}] 返回非XML数据 (前50字符: {xml_str[:50]})")
                 return []
 
             root = ET.fromstring(xml_str)
@@ -255,6 +257,11 @@ class NewsWorker(QThread):
             results = []
             seen_in_source = set()
             query_lower = self.query.lower().strip()
+            
+            # 判断是否为浏览模式（无特定搜索词）
+            # 浏览模式: query为空、'latest'、或长度<=2的短词 -> 返回所有新闻
+            is_browse_mode = (not query_lower or query_lower == 'latest' 
+                              or len(query_lower) <= 2)
 
             for item in items:
                 link_node = item.find('link')
@@ -282,8 +289,8 @@ class NewsWorker(QThread):
                 if len(pub_date) > 16:
                     pub_date = pub_date[:16]
 
-                # 简单子串匹配（与原始代码一致）
-                if (query_lower in title.lower()
+                # 浏览模式：返回所有新闻；搜索模式：子串匹配
+                if is_browse_mode or (query_lower in title.lower()
                         or query_lower in body_text.lower()):
                     seen_in_source.add(link)
                     results.append({
@@ -295,11 +302,14 @@ class NewsWorker(QThread):
                         "url": link,
                     })
 
-            logger.debug(f"RSS源 [{src['name']}] 获取到 {len(results)} 条匹配")
+            logger.info(f"RSS源 [{src['name']}] 获取到 {len(results)} 条"
+                       f"(共{len(items)}条, 模式={'浏览' if is_browse_mode else '搜索'})")
             return results
 
         except Exception as e:
-            logger.debug(f"RSS源下载失败 [{src.get('name', '?')}]: {e}")
+            import traceback
+            logger.error(f"RSS源下载失败 [{src.get('name', '?')}]: "
+                       f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
             return []
 
     def run(self):

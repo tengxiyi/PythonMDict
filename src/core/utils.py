@@ -8,6 +8,7 @@ import re
 import html as html_module
 import zlib
 import urllib.parse
+import urllib.request  # HTTP请求所需
 from typing import Optional
 
 from .logger import logger
@@ -250,59 +251,65 @@ def process_entry_task(args: tuple) -> dict:
 
 # ============== 网络请求 ==============
 
-# 全局 SSL 上下文复用（避免每次请求重建，打包后 OpenSSL 初始化很慢）
-_ssl_context = None
-
-def _get_ssl_context():
-    """获取/创建全局 SSL 上下文（懒加载+单例）"""
-    global _ssl_context
-    if _ssl_context is None:
-        import ssl
-        _ssl_context = ssl.create_default_context()
-        _ssl_context.check_hostname = False
-        _ssl_context.verify_mode = ssl.CERT_NONE
-    return _ssl_context
-
-
-def fetch_url_content(url: str, timeout: int = 5) -> Optional[bytes]:
+def fetch_url_content(url: str, timeout: int = 5, max_retries: int = 2) -> Optional[bytes]:
     """
-    通用HTTP下载函数（支持SSL和gzip解压）
+    通用HTTP下载函数（支持SSL和gzip解压，带自动重试）
+    
+    使用默认SSL上下文避免冷启动问题，每次重试会重建连接
     
     Args:
         url: 目标URL
-        timeout: 超时时间(秒)
+        timeout: 每次请求的超时时间(秒)
+        max_retries: 最大重试次数
         
     Returns:
         下载的字节数据或None
     """
     import gzip
+    import ssl
+    import urllib.error
     
-    try:
-        ctx = _get_ssl_context()
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                          'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Encoding': 'gzip',  # 显式声明支持gzip
-            'Connection': 'close',
-        }
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                      'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Encoding': 'gzip',
+        'Connection': 'close',
+    }
+    
+    last_error = None
+    
+    for attempt in range(max_retries):
         try:
-            req = urllib.request.Request(url, headers=headers)
-        except ValueError:
-            return None
+            # 每次请求都创建新的SSL context（避免状态污染）
+            # 同时也避免了首次初始化的冷启动问题
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            try:
+                req = urllib.request.Request(url, headers=headers)
+            except ValueError:
+                return None
 
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as response:
-            data = response.read()
-            if response.info().get('Content-Encoding') == 'gzip':
-                try:
-                    data = gzip.decompress(data)
-                except Exception:
-                    pass
-            return data
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as response:
+                data = response.read()
+                if response.info().get('Content-Encoding') == 'gzip':
+                    try:
+                        data = gzip.decompress(data)
+                    except Exception:
+                        pass
+                return data
 
-    except Exception as e:
-        logger.debug(f"下载失败 [{url}]: {e}")
-        return None
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                logger.debug(f"下载失败 [{url}] 第{attempt+1}次重试: {type(e).__name__}: {e}")
+                import time
+                time.sleep(0.3 * (attempt + 1))
+            else:
+                logger.debug(f"下载失败 [{url}]: {type(e).__name__}: {e}")
+    
+    return None
 
 
 # ============== EPUB 解析 ==============
