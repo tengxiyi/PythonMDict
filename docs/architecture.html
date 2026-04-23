@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>极客词典Pro - 系统架构图</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #334155;
+            --border: #475569;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.3);
+            --accent: #f472b6;
+            --success: #34d399;
+            --warning: #fbbf24;
+            --purple: #a78bfa;
+            --orange: #fb923c;
+            --green: #4ade80;
+            --red: #f87171;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 24px 40px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .header-icon {
+            width: 48px; height: 48px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .header p { color: var(--text2); margin-top: 4px; font-size: 14px; }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            padding: 16px 40px;
+            background: rgba(30, 41, 59, 0.5);
+            border-bottom: 1px solid var(--border);
+        }
+        .tab-btn {
+            padding: 10px 24px;
+            border: none;
+            background: transparent;
+            color: var(--text2);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover { background: var(--card); color: var(--text); }
+        .tab-btn.active {
+            background: var(--card);
+            color: var(--primary);
+            box-shadow: 0 -2px 12px var(--primary-glow);
+        }
+
+        /* Main Content */
+        .content { padding: 32px 40px; max-width: 1600px; margin: 0 auto; }
+        .tab-content { display: none; animation: fadeIn 0.3s ease; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Architecture Diagram */
+        .arch-container {
+            display: grid;
+            grid-template-columns: 200px 1fr 220px;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 20px;
+            min-height: 700px;
+        }
+
+        .layer-title {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            border-radius: 8px;
+            margin-bottom: 4px;
+        }
+
+        /* Module Box */
+        .module {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .module::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            border-radius: 12px 12px 0 0;
+        }
+        .module:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+            border-color: var(--primary);
+        }
+        .module h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .module h3 .icon { font-size: 18px; }
+        .module ul { list-style: none; }
+        .module li {
+            padding: 5px 0;
+            font-size: 12px;
+            color: var(--text2);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: default;
+        }
+        .module li:hover { color: var(--text); }
+        .module li .dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* Color Variants */
+        .mod-presentation { grid-column: 1 / -1; }
+        .mod-presentation::before { background: linear-gradient(90deg, var(--primary), var(--accent)); }
+        
+        .mod-gui::before { background: var(--purple); }
+        .mod-gui h3 { color: var(--purple); }
+
+        .mod-business::before { background: var(--success); }
+        .mod-business h3 { color: var(--success); }
+
+        .mod-data::before { background: var(--warning); }
+        .mod-data h3 { color: var(--warning); }
+
+        .mod-ext::before { background: var(--orange); }
+        .mod-ext h3 { color: var(--orange); }
+
+        .mod-webview::before { background: var(--green); }
+        .mod-webview h3 { color: var(--green); }
+
+        .mod-learning::before { background: var(--red); }
+        .mod-learning h3 { color: var(--red); }
+
+        /* Flow Diagram */
+        .flow-container { display: flex; flex-direction: column; gap: 24px; }
+        .flow-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .flow-box {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 20px;
+            text-align: center;
+            min-width: 140px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        .flow-box:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .flow-box .fb-icon { font-size: 28px; margin-bottom: 6px; }
+        .flow-box .fb-label { font-size: 13px; font-weight: 600; }
+        .flow-box .fb-desc { font-size: 11px; color: var(--text2); margin-top: 4px; }
+        .flow-arrow {
+            color: var(--primary);
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .flow-arrow-down {
+            color: var(--primary);
+            font-size: 28px;
+            text-align: center;
+            transform: rotate(90deg);
+        }
+
+        /* Data Flow */
+        .dataflow-container { display: flex; flex-direction: column; gap: 20px; }
+        .df-section {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .df-section h3 {
+            font-size: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .df-flow {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            overflow-x: auto;
+            padding: 12px 0;
+        }
+        .df-node {
+            background: var(--card2);
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 18px;
+            min-width: 130px;
+            text-align: center;
+            flex-shrink: 0;
+            transition: all 0.3s;
+        }
+        .df-node:hover { border-color: var(--primary); transform: translateY(-2px); }
+        .df-node .dn-icon { font-size: 22px; }
+        .df-node .dn-name { font-size: 12px; font-weight: 600; margin-top: 4px; }
+        .df-node .dn-detail { font-size: 10px; color: var(--text2); margin-top: 2px; }
+        .df-arrow {
+            color: var(--primary);
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        .df-line {
+            width: 40px; height: 2px;
+            background: linear-gradient(90deg, var(--primary), transparent);
+            flex-shrink: 0;
+        }
+
+        /* DB Schema */
+        .db-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 20px;
+        }
+        .db-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .db-header {
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 15px;
+        }
+        .db-header.db-main { background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), transparent); color: var(--warning); }
+        .db-header.db-mdd { background: linear-gradient(135deg, rgba(74, 222, 128, 0.2), transparent); color: var(--green); }
+        .db-table {
+            padding: 16px 18px;
+        }
+        .db-table h4 {
+            font-size: 13px;
+            color: var(--primary);
+            margin-bottom: 10px;
+            font-family: 'Consolas', monospace;
+        }
+        .db-field {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            margin-bottom: 2px;
+        }
+        .db-field:nth-child(odd) { background: rgba(255,255,255,0.03); }
+        .db-field .fname { color: var(--text); font-family: 'Consolas', monospace; }
+        .db-field .ftype { color: var(--text2); font-size: 11px; }
+        .db-field .fkey { 
+            font-size: 9px; 
+            padding: 1px 6px; 
+            border-radius: 4px; 
+            background: rgba(248, 113, 113, 0.2); 
+            color: var(--red);
+        }
+
+        /* Tech Stack */
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+        }
+        .tech-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+        .tech-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-3px);
+        }
+        .tech-card .tc-cat {
+            font-size: 11px;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        .tech-card .tc-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .tech-card .tc-item:last-child { border-bottom: none; }
+        .tc-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .badge-blue { background: rgba(56, 189, 248, 0.15); color: var(--primary); }
+        .badge-green { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+        .badge-purple { background: rgba(167, 139, 250, 0.15); color: var(--purple); }
+        .badge-orange { background: rgba(251, 146, 60, 0.15); color: var(--orange); }
+        .badge-pink { background: rgba(244, 114, 182, 0.15); color: var(--accent); }
+        .badge-yellow { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding: 16px 24px;
+            background: var(--card);
+            border-radius: 10px;
+            margin-top: 24px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text2);
+        }
+        .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+        /* Stats Bar */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            text-align: center;
+        }
+        .stat-num {
+            font-size: 32px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <div class="header-icon">📖</div>
+    <div>
+        <h1>极客词典 Pro (GeekDictPro)</h1>
+        <p>基于 PySide6 + Qt WebEngine 的现代化桌面电子词典应用 · 系统架构设计文档</p>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchTab(event, 'arch')">🏗️ 架构总览</button>
+    <button class="tab-btn" onclick="switchTab(event, 'flow')">🔄 核心数据流</button>
+    <button class="tab-btn" onclick="switchTab(event, 'db')">🗄️ 数据库设计</button>
+    <button class="tab-btn" onclick="switchTab(event, 'tech')">⚙️ 技术栈</button>
+</div>
+
+<div class="content">
+
+    <!-- Tab 1: Architecture Overview -->
+    <div id="tab-arch" class="tab-content active">
+        <!-- Stats -->
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-num">~4,700</div>
+                <div class="stat-label">总代码行数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num">18</div>
+                <div class="stat-label">核心类/模块</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num">7</div>
+                <div class="stat-label">功能页面</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num">10</div>
+                <div class="stat-label">主题配色方案</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num">2</div>
+                <div class="stat-label">SQLite数据库</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num">8</div>
+                <div class="stat-label">QThread工作线程</div>
+            </div>
+        </div>
+
+        <div class="arch-container">
+            
+            <!-- Presentation Layer -->
+            <div class="layer-title" style="background: linear-gradient(90deg, rgba(56,189,248,0.15), rgba(244,114,182,0.15));">
+                📱 表示层 (Presentation Layer) — main.py (3507行)
+            </div>
+            
+            <div class="module mod-gui">
+                <h3><span class="icon">🖼️</span> GUI 组件</h3>
+                <ul>
+                    <li><span class="dot" style="background:var(--purple)"></span> ModernMainWindow (主窗口·懒加载)</li>
+                    <li><span class="dot" style="background:var(--purple)"></span> Sidebar (导航栏·7按钮)</li>
+                    <li><span class="dot" style="background:var(--purple)"></span> ThemeManager (10种主题)</li>
+                    <li><span class="dot" style="background:var(--purple)"></span> ClipboardWatcher (剪贴板监控)</li>
+                    <li><span class="dot" style="background:var(--purple)"></span> MasteryRing (环形进度条)</li>
+                    <li><span class="dot" style="background:var(--purple)"></span> FloatingText (+10 XP动画)</li>
+                </ul>
+            </div>
+            
+            <div class="module mod-business">
+                <h3><span class="icon">📄</span> 页面组件</h3>
+                <ul>
+                    <li><span class="dot" style="background:var(--success)"></span> SearchSplitPage (主页·搜索+词典)</li>
+                    <li><span class="dot" style="background:var(--success)"></span> HistoryPage (搜索历史)</li>
+                    <li><span class="dot" style="background:var(--success)"></span> VocabPage (词汇本·闪卡·测验)</li>
+                    <li><span class="dot" style="background:var(--success)"></span> DictManagerPage (词典管理)</li>
+                    <li><span class="dot" style="background:var(--success)"></span> SettingsPage (RSS新闻源)</li>
+                    <li><span class="dot" style="background:var(--success)"></span> TextAnalyzerPage (文本分析)</li>
+                    <li><span class="dot" style="background:var(--success)"></span> ThemePage (主题选择)</li>
+                </ul>
+            </div>
+            
+            <div class="module mod-webview">
+                <h3><span class="icon">🌐</span> WebEngine</h3>
+                <ul>
+                    <li><span class="dot" style="background:var(--green)"></span> MdictSchemeHandler (mdict://协议)</li>
+                    <li><span class="dot" style="background:var(--green)"></span> DictWebPage (词典页面·链接拦截)</li>
+                    <li><span class="dot" style="background:var(--green)"></span> NewsWebPage (新闻阅读器)</li>
+                    <li><span class="dot" style="background:var(--green)"></span> QWebEngineView (Chromium渲染)</li>
+                    <li><span class="dot" style="background:var(--green)"></span> CSS智能路由 & 字体处理</li>
+                    <li><span class="dot" style="background:var(--green)"></span> MDDCacheManager (资源缓存)</li>
+                </ul>
+            </div>
+
+            <!-- Business Logic Layer -->
+            <div class="layer-title" style="background: linear-gradient(90deg, rgba(52,211,153,0.15), rgba(74,222,128,0.15));">
+                ⚙️ 业务逻辑层 (Business Logic Layer) — backend.py (1178行)
+            </div>
+
+            <div class="module mod-business" style="grid-column: 1 / -1;">
+                <h3><span class="icon">🔧</span> 核心引擎 (QThread 异步线程池)</h3>
+                <ul style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 24px;">
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>SearchWorker</strong> — 查词核心 (精确匹配 + FTS5全文)</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>IndexerWorker</strong> — MDX/MDD词典导入</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>NewsWorker</strong> — RSS新闻聚合搜索</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>NewsContentWorker</strong> — 新闻正文抓取清洗</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>QuizWorker</strong> — 测验题目生成</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>AnalyzerWorker</strong> — 文本词频分析</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>RSSTestWorker</strong> — RSS源有效性测试</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>process_entry_task()</strong> — 词条解压+链接重写</li>
+                    <li><span class="dot" style="background:var(--success)"></span> <strong>generate_quiz_data()</strong> — 智能挖空生成选择题</li>
+                </ul>
+            </div>
+
+            <!-- Data Layer -->
+            <div class="layer-title" style="background: linear-gradient(90deg, rgba(251,191,36,0.15), rgba(251,146,60,0.15));">
+                🗄️ 数据层 (Data Layer)
+            </div>
+
+            <div class="module mod-data">
+                <h3><span class="icon">💾</span> dict_cache.db (主库)</h3>
+                <ul>
+                    <li><span class="dot" style="background:var(--warning)"></span> dict_info — 词典元信息</li>
+                    <li><span class="dot" style="background:var(--warning)"></span> standard_entries — 词条存储(zlib压缩)</li>
+                    <li><span class="dot" style="background:var(--warning)"></span> fts_entries — FTS5全文索引</li>
+                    <li><span class="dot" style="background:var(--warning)"></span> vocabulary — 词汇本(艾宾浩斯)</li>
+                    <li><span class="dot" style="background:var(--warning)"></span> search_history — 搜索历史</li>
+                    <li><span class="dot" style="background:var(--warning)"></span> rss_sources — 新闻源配置</li>
+                </ul>
+            </div>
+
+            <div class="module mod-ext">
+                <h3><span class="icon">📦</span> 外部依赖</h3>
+                <ul>
+                    <li><span class="dot" style="background:var(--orange)"></span> readmdict — MDX/MDD解析</li>
+                    <li><span class="dot" style="background:var(--orange)"></span> OpenCC — 简繁转换(懒加载)</li>
+                    <li><span class="dot" style="background:var(--orange)"></span> SQLite3 — FTS5 + WAL模式</li>
+                    <li><span class="dot" style="background:var(--orange)"></span> PySide6 — Qt6 GUI框架</li>
+                    <li><span class="dot" style="background:var(--orange)"></span> QWebEngine — Chromium内核</li>
+                    <li><span class="dot" style="background:var(--orange)"></span> MDX/MDD文件 — 词典数据源</li>
+                </ul>
+            </div>
+
+            <div class="module mod-ext" style="border-color: var(--green);">
+                <h3><span class="icon">🎒</span> mdd_cache.db (资源库)</h3>
+                <ul>
+                    <li><span class="dot" style="background:var(--green)"></span> resources — 图片/音频/CSS/字体</li>
+                    <li><span class="dot" style="background:var(--green)"></span> cached_dicts — 缓存元信息</li>
+                    <li><span class="dot" style="background:var(--green)"></span> 物理文件回退查找</li>
+                    <li><span class="dot" style="background:var(--green)"></span> 多级路径候选扩展</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div> GUI组件层</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--success)"></div> 业务逻辑层</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> WebView/资源层</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--warning)"></span></div> 数据持久层</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> 第三方库</div>
+        </div>
+    </div>
+
+    <!-- Tab 2: Data Flow -->
+    <div id="tab-flow" class="tab-content">
+        <div class="dataflow-container">
+            
+            <!-- Search Flow -->
+            <div class="df-section">
+                <h3>🔍 流程一：用户查词流程</h3>
+                <div class="df-flow">
+                    <div class="df-node">
+                        <div class="dn-icon">⌨️</div>
+                        <div class="dn-name">用户输入</div>
+                        <div class="dn-detail">SearchSplitPage.do_search()</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🧵</div>
+                        <div class="dn-name">SearchWorker</div>
+                        <div class="dn-detail">QThread异步执行</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">📋</div>
+                        <div class="dn-name">精确匹配 / FTS5</div>
+                        <div class="dn-detail">英文: NOCASE | 中文: OpenCC+FTS5</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">📊</div>
+                        <div class="dn-name">排序截断 Top30</div>
+                        <div class="dn-detail">匹配度 > 优先级 > 词长</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🔧</div>
+                        <div class="dn-name">process_entry_task</div>
+                        <div class="dn-detail">zlib解压 + 链接重写</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🌐</div>
+                        <div class="dn-name">QWebEngineView</div>
+                        <div class="dn-detail">Chromium渲染HTML</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🔗</div>
+                        <div class="dn-name">点击 entry:// 链接</div>
+                        <div class="dn-detail">DictWebPage 拦截 → 新搜索</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Import Flow -->
+            <div class="df-section">
+                <h3>📥 流程二：词典导入流程</h3>
+                <div class="df-flow">
+                    <div class="df-node">
+                        <div class="dn-icon">📂</div>
+                        <div class="dn-name">选择 .mdx 文件</div>
+                        <div class="dn-detail">DictManagerPage.add()</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🧵</div>
+                        <div class="dn-name">IndexerWorker</div>
+                        <div class="dn-detail">QThread后台导入</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">📖</div>
+                        <div class="dn-name">readmdict.MDX</div>
+                        <div class="dn-detail">解析MDX迭代词条</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🗜️</div>
+                        <div class="dn-name">pre_process_entry</div>
+                        <div class="dn-detail">路径重写→mdict:// + zlib压缩</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">💾</div>
+                        <div class="dn-name">批量写入SQLite</div>
+                        <div class="dn-detail">每2000条commit + FTS5索引</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🎒</div>
+                        <div class="dn-name">MDD资源导入</div>
+                        <div class="dn-detail">图片/音频/CSS → mdd_cache.db</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resource Loading Flow -->
+            <div class="df-section">
+                <h3>🖼️ 流程三：资源加载流程 (mdict:// 协议)</h3>
+                <div class="df-flow">
+                    <div class="df-node">
+                        <div class="dn-icon">🌐</div>
+                        <div class="dn-name">WebView请求资源</div>
+                        <div class="dn-detail">&lt;img src="mdict://1/images/x.png"&gt;</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🔌</div>
+                        <div class="dn-name">MdictSchemeHandler</div>
+                        <div class="dn-detail">requestStarted() 拦截</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🔍</div>
+                        <div class="dn-name">多级查找策略</div>
+                        <div class="dn-detail">路径候选扩展 > 物理文件 > MDD模糊</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">✅</div>
+                        <div class="dn-name">返回数据</div>
+                        <div class="dn-detail">reply_data(mime_type, bytes)</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🎨</div>
+                        <div class="dn-name">浏览器渲染</div>
+                        <div class="dn-detail">图片/音频/CSS正常显示</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Learning Flow -->
+            <div class="df-section">
+                <h3>📚 流程四：词汇学习流程</h3>
+                <div class="df-flow">
+                    <div class="df-node">
+                        <div class="dn-icon">⭐</div>
+                        <div class="dn-name">查词时点击收藏</div>
+                        <div class="dn-detail">插入 vocabulary 表</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🔄</div>
+                        <div class="dn-name">艾宾浩斯复习系统</div>
+                        <div class="dn-detail">8阶段间隔: 5m→30m→12h→...</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🃏</div>
+                        <div class="dn-name">闪卡模式</div>
+                        <div class="dn-detail">显示单词 → 认识/不认识 → 更新阶段</div>
+                    </div>
+                    <div class="df-arrow">或</div>
+                    <div class="df-node">
+                        <div class="dn-icon">❓</div>
+                        <div class="dn-name">测验模式</div>
+                        <div class="dn-detail">QuizWorker挖空句子 → 4选1 → XP奖励</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- News Flow -->
+            <div class="df-section">
+                <h3>📰 流程五：新闻聚合流程</h3>
+                <div class="df-flow">
+                    <div class="df-node">
+                        <div class="dn-icon">📡</div>
+                        <div class="dn-name">查词触发NewsWorker</div>
+                        <div class="dn-detail">多RSS源并行搜索</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">🌐</div>
+                        <div class="dn-name">fetch_url_content</div>
+                        <div class="dn-detail">HTTPS下载 + Gzip解压</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">📋</div>
+                        <div class="dn-name">XML解析过滤</div>
+                        <div class="dn-detail">关键词匹配 → 去重</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">📝</div>
+                        <div class="dn-name">render_news</div>
+                        <div class="dn-detail">左侧显示新闻列表</div>
+                    </div>
+                    <div class="df-arrow">→</div>
+                    <div class="df-node">
+                        <div class="dn-icon">📖</div>
+                        <div class="dn-name">点击新闻 → 抓取正文</div>
+                        <div class="dn-detail">NewsContentWorker → HTML清洗 → 内嵌阅读器</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Tab 3: Database Design -->
+    <div id="tab-db" class="tab-content">
+        <div class="db-grid">
+            <!-- Main DB -->
+            <div class="db-card">
+                <div class="db-header db-main">📦 dict_cache.db — 主数据库 (72KB, WAL模式)</div>
+                
+                <div class="db-table">
+                    <h4>TABLE: dict_info (词典元信息)</h4>
+                    <div class="db-field"><span class="fname">id</span><span class="ftype">INTEGER PK AUTOINCREMENT</span></div>
+                    <div class="db-field"><span class="fname">path</span><span class="ftype">TEXT UNIQUE</span></div>
+                    <div class="db-field"><span class="fname">name</span><span class="ftype">TEXT</span></div>
+                    <div class="db-field"><span class="fname">mdd_path</span><span class="ftype">TEXT</span></div>
+                    <div class="db-field"><span class="fname">priority</span><span class="ftype">INTEGER DEFAULT 0</span></div>
+                </div>
+
+                <div class="db-table">
+                    <h4>TABLE: standard_entries (词条存储)</h4>
+                    <div class="db-field"><span class="fname">word</span><span class="ftype">TEXT</span></div>
+                    <div class="db-field"><span class="fname">content</span><span class="ftype">BLOB (zlib压缩HTML)</span></div>
+                    <div class="db-field"><span class="fname">dict_id</span><span class="ftype">INTEGER → dict_info.id</span><span class="fkey">FK</span></div>
+                    <div class="db-field"><span class="fname">length</span><span class="ftype">INTEGER</span></div>
+                    <div style="margin-top:6px;font-size:11px;color:var(--primary)">
+                        INDEX: idx_word(COLLATE NOCASE), idx_dict
+                    </div>
+                </div>
+
+                <div class="db-table">
+                    <h4>VIRTUAL TABLE: fts_entries (FTS5全文搜索)</h4>
+                    <div class="db-field"><span class="fname">word</span><span class="ftype">TEXT</span></div>
+                    <div class="db-field"><span class="fname">content_text</span><span class="ftype">TEXT (纯文本)</span></div>
+                    <div class="db-field"><span class="fname">dict_id</span><span class="ftype">UNINDEXED</span></div>
+                </div>
+
+                <div class="db-table">
+                    <h4>TABLE: vocabulary (词汇本 - 艾宾浩斯)</h4>
+                    <div class="db-field"><span class="fname">word</span><span class="ftype">TEXT PRIMARY KEY</span></div>
+                    <div class="db-field"><span class="fname">added_time</span><span class="ftype">REAL</span></div>
+                    <div class="db-field"><span class="fname">review_stage</span><span class="ftype">INTEGER DEFAULT 0 (0-7)</span></div>
+                    <div class="db-field"><span class="fname">next_review_time</span><span class="ftype">REAL</span></div>
+                    <div class="db-field"><span class="fname">context</span><span class="ftype">TEXT</span></div>
+                    <div class="db-field"><span class="fname">source</span><span class="ftype">TEXT</span></div>
+                    <div class="db-field"><span class="fname">xp</span><span class="ftype">INTEGER DEFAULT 0</span></div>
+                </div>
+
+                <div class="db-table">
+                    <h4>TABLE: search_history (搜索历史)</h4>
+                    <div class="db-field"><span class="fname">word</span><span class="ftype">TEXT PRIMARY KEY</span></div>
+                    <div class="db-field"><span class="fname">last_access_time</span><span class="ftype">REAL</span></div>
+                    <div class="db-field"><span class="fname">search_count</span><span class="ftype">INTEGER DEFAULT 1</span></div>
+                </div>
+
+                <div class="db-table">
+                    <h4>TABLE: rss_sources (新闻源配置)</h4>
+                    <div class="db-field"><span class="fname">id</span><span class="ftype">INTEGER PK AUTOINCREMENT</span></div>
+                    <div class="db-field"><span class="fname">name</span><span class="ftype">TEXT</span></div>
+                    <div class="db-field"><span class="fname">url</span><span class="ftype">TEXT UNIQUE</span></div>
+                    <div class="db-field"><span class="fname">enabled</span><span class="ftype">INTEGER DEFAULT 1</span></div>
+                </div>
+            </div>
+
+            <!-- MDD DB -->
+            <div class="db-card">
+                <div class="db-header db-mdd">🎒 mdd_cache.db — 资源数据库 (16KB, WAL模式)</div>
+                
+                <div class="db-table">
+                    <h4>TABLE: resources (词典资源)</h4>
+                    <div class="db-field"><span class="fname">dict_id</span><span class="ftype">INTEGER</span><span class="fkey">PK part</span></div>
+                    <div class="db-field"><span class="fname">norm_key</span><span class="ftype">TEXT (规范化路径)</span><span class="fkey">PK part</span></div>
+                    <div class="db-field"><span class="fname">data</span><span class="ftype">BLOB (原始字节)</span></div>
+                    <div style="margin-top:6px;font-size:11px;color:var(--green)">
+                        PRIMARY KEY: (dict_id, norm_key)<br>
+                        支持: 图片(.png/.jpg)、音频(.mp3/.wav)、CSS、字体等
+                    </div>
+                </div>
+
+                <div class="db-table">
+                    <h4>TABLE: cached_dicts (缓存元信息)</h4>
+                    <div class="db-field"><span class="fname">dict_id</span><span class="ftype">INTEGER PRIMARY KEY</span></div>
+                    <div class="db-field"><span class="fname">mdd_path</span><span class="ftype">TEXT (来源路径)</span></div>
+                    <div class="db-field"><span class="fname">cached_time</span><span class="ftype">REAL (导入时间戳)</span></div>
+                </div>
+
+                <!-- Ebbinghaus Intervals -->
+                <div class="db-table" style="margin-top: 16px;">
+                    <h4 style="color:var(--accent)">⏱️ 艾宾浩斯遗忘曲线间隔 (EBBINGHAUS_INTERVALS)</h4>
+                    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px;">
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 0</div>
+                            <div style="font-size:11px;color:var(--text2)">5分钟</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 1</div>
+                            <div style="font-size:11px;color:var(--text2)">30分钟</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 2</div>
+                            <div style="font-size:11px;color:var(--text2)">12小时</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 3</div>
+                            <div style="font-size:11px;color:var(--text2)">1天</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 4</div>
+                            <div style="font-size:11px;color:var(--text2)">2天</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 5</div>
+                            <div style="font-size:11px;color:var(--text2)">4天</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 6</div>
+                            <div style="font-size:11px;color:var(--text2)">7天</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;">
+                            <div style="font-weight:700;color:var(--primary)">Stage 7</div>
+                            <div style="font-size:11px;color:var(--text2)">15天</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 4: Tech Stack -->
+    <div id="tab-tech" class="tab-content">
+        <div class="tech-grid">
+            <div class="tech-card">
+                <div class="tc-cat">🖥️ GUI 框架</div>
+                <div class="tc-item"><span class="tc-badge badge-purple">PySide6 (Qt 6.10)</span> Python Qt6绑定</div>
+                <div class="tc-item"><span class="tc-badge badge-green">Qt WebEngine</span> Chromium内核浏览器</div>
+                <div class="tc-item"><span class="tc-badge badge-blue">QWebEngineUrlScheme</span> 自定义mdict://协议</div>
+                <div class="tc-item"><span class="tc-badge badge-pink">QSS Stylesheet</span> 动态主题样式表</div>
+                <div class="tc-item"><span class="tc-badge badge-orange">QSvgRenderer</span> SVG图标动态着色</div>
+            </div>
+            <div class="tech-card">
+                <div class="tc-cat">💾 数据存储</div>
+                <div class="tc-item"><span class="tc-badge badge-yellow">SQLite3 + FTS5</span> 全文搜索引擎</div>
+                <div class="tc-item"><span class="tc-badge badge-blue">WAL Journal Mode</span> 并发读写优化</div>
+                <div class="tc-item"><span class="tc-badge badge-green">Zlib 压缩</span> 词条内容压缩存储</div>
+                <div class="tc-item"><span class="tc-badge badge-orange">readmdict</span> MDX/MDD词典格式解析</div>
+            </div>
+            <div class="tech-card">
+                <div class="tc-category">🔧 核心工具库</div>
+                <div class="tc-item"><span class="tc-badge badge-purple">OpenCC</span> 中文简繁转换（懒加载单例）</div>
+                <div class="tc-item"><span class="tc-badge badge-green">xml.etree.ElementTree</span> RSS XML解析</div>
+                <div class="tc-item"><span class="tc-badge badge-blue">urllib + ssl</span> HTTPS网络请求</div>
+                <div class="tc-item"><span class="tc-badge badge-orange">zipfile</span> EPUB文本提取</div>
+                <div class="tc-item"><span class="tc-badge badge-pink">ThreadPoolExecutor</span> 全局线程池</div>
+            </div>
+            <div class="tech-card">
+                <div class="tc-cat">📦 打包部署</div>
+                <div class="tc-item"><span class="tc-badge badge-blue">PyInstaller</span> 主打包工具(Onedir)</div>
+                <div class="tc-item"><span class="tc-badge badge-green">Nuitka</span> 备选编译型打包</div>
+                <div class="tc-item"><span class="tc-badge badge-orange">Windows API</span> 任务栏图标/AppID</div>
+                <div class="tc-item"><span class="tc-badge badge-pink">ctypes</span> Windows系统集成</div>
+            </div>
+            <div class="tech-card">
+                <div class="tc-cat">🎨 设计亮点</div>
+                <div class="tc-item"><span class="tc-badge badge-purple">10种精选主题</span> Nord/Dracula/Solarized等</div>
+                <div class="tc-item"><span class="tc-badge badge-green">懒加载架构</span> 首次访问才初始化页面</div>
+                <div class="tc-item"><span class="tc-badge badge-blue">分批渲染</span> 前3个立即返回，其余后台</div>
+                <div class="tc-item"><span class="tc-badge badge-orange">按需导入</span>重型库函数内import避免启动延迟</div>
+                <div class="tc-item"><span class="tc-badge badge-pink">多级容错</span> 资源查找fallback链</div>
+            </div>
+            <div class="tech-card">
+                <div class="tc-cat">🌐 Web原型 (src/)</div>
+                <div class="tc-item"><span class="tc-badge badge-blue">React + TypeScript</span> 前端技术栈</div>
+                <div class="tc-item"><span class="tc-badge badge-green">HomePage.tsx</span> 首页组件(Mock数据)</div>
+                <div class="tc-item"><span class="tc-badge badge-purple">HomePage.css</span> 样式文件</div>
+                <div style="padding:8px;background:rgba(251,191,36,0.1);border-radius:6px;margin-top:8px;font-size:11px;color:var(--warning);">
+                    ⚠️ 目前为独立原型，未与桌面端集成
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function switchTab(e, tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    e.target.classList.add('active');
+    document.getElementById('tab-' + tabId).classList.add('active');
+}
+</script>
+
+</body>
+</html>

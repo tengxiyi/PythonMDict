@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+venv_build/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.sqlite3
+
+# Build outputs
+*.spec
+Nuitka打包说明.docx
+打包指令： pyinstaller build.spec   .txt
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# CodeBuddy
+.codebuddy/
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+temp/
+*.tmp
