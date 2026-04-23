@@ -389,6 +389,12 @@ class SearchSplitPage(QWidget):
             if not query:
                 query = "latest"
 
+            # 防重复：如果已有worker在运行且查询相同，不创建新worker
+            if hasattr(self, 'news_worker') and self.news_worker is not None:
+                if getattr(self, '_current_loading_query', None) == query:
+                    logger.debug(f"[新闻] 已有相同query的worker在运行，跳过: {query}")
+                    return
+
             # 安全终止可能仍在运行的前一个worker（先断开信号防止竞态）
             if hasattr(self, 'news_worker') and self.news_worker is not None:
                 try:
@@ -402,13 +408,22 @@ class SearchSplitPage(QWidget):
                     pass
                 self.news_worker = None
 
-            self.web_news.setHtml("<h3>正在加载新闻...</h3>")
+            self._current_loading_query = query
+            self.web_news.setHtml(
+                f"<html><head><style>body{{font-family:'Segoe UI','Microsoft YaHei',sans-serif;"
+                f"background:#f8f9fa;display:flex;align-items:center;justify-content:center;"
+                f"height:95vh;margin:0;color:#666;text-align:center;}}</style></head>"
+                f"<body><div><h3 style='margin-bottom:12px;'>正在加载新闻...</h3>"
+                f"<p style='font-size:13px;color:#999;'>搜索关键词: {query}</p>"
+                f"<p style='font-size:12px;color:#bbb;'>请稍候，最多等待20秒...</p></div></body></html>"
+            )
             self.news_worker = NewsWorker(query)
             # 使用 unique 连接方式防止重复绑定
             self.news_worker.news_ready.connect(self.render_news)
             self._worker_ref = self.news_worker
 
             def _cleanup():
+                self._current_loading_query = None
                 try:
                     self._worker_ref.news_ready.disconnect(self.render_news)
                 except Exception:
@@ -504,16 +519,22 @@ class SearchSplitPage(QWidget):
             # 安全终止前一个worker
             if hasattr(self, 'news_worker') and self.news_worker is not None:
                 try:
+                    self.news_worker.news_ready.disconnect(self.render_news)
+                except Exception:
+                    pass
+                try:
                     self.news_worker.quit()
                     self.news_worker.wait(1000)
                 except Exception:
                     pass
                 self.news_worker = None
 
+            self._current_loading_query = text
             self.news_worker = NewsWorker(text)
             self.news_worker.news_ready.connect(self.render_news)
             self._worker_ref = self.news_worker
             def _cleanup():
+                self._current_loading_query = None
                 self._worker_ref = None
             self.news_worker.finished.connect(_cleanup)
             self.news_worker.start()

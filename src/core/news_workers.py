@@ -4,10 +4,9 @@
 RSS新闻相关的工作线程
 包含RSS源测试、新闻内容提取、新闻聚合搜索等功能
 """
-import xml.etree.ElementTree as ET
 import re
 import sqlite3
-import urllib.request
+import xml.etree.ElementTree as ET
 
 from PySide6.QtCore import QThread, Signal
 
@@ -215,7 +214,9 @@ class NewsContentWorker(QThread):
 
 class NewsWorker(QThread):
     """
-    新闻聚合搜索工作线程（与原始backend.py保持一致）
+    新闻聚合搜索工作线程
+    
+    优化：使用线程池并行下载RSS源，添加总超时保护，避免打包版本长时间卡死
     
     Signals:
         news_ready(list, str): (搜索结果列表, 查询关键词)
@@ -226,18 +227,88 @@ class NewsWorker(QThread):
     def __init__(self, query: str):
         super().__init__()
         self.query = query
+        # 超时配置（打包后网络较慢，需要合理超时）
+        self._per_source_timeout = 6   # 单个RSS源超时（秒）
+        self._total_timeout = 20       # 整体最大等待时间（秒）
+
+    def _fetch_single_source(self, src: dict) -> list:
+        """获取单个RSS源的结果（在线程池中并行执行）"""
+
+        try:
+            data = fetch_url_content(src['url'], timeout=self._per_source_timeout)
+            if not data:
+                return []
+
+            try:
+                xml_str = data.decode('utf-8', 'ignore').strip()
+            except Exception:
+                xml_str = data.decode('gbk', 'ignore').strip()
+
+            if not xml_str.startswith('<'):
+                return []
+
+            root = ET.fromstring(xml_str)
+            items = root.findall('./channel/item')
+            if not items:
+                items = root.findall('item')
+
+            results = []
+            seen_in_source = set()
+            query_lower = self.query.lower().strip()
+
+            for item in items:
+                link_node = item.find('link')
+                if link_node is None or not link_node.text:
+                    continue
+                link = link_node.text.strip()
+                if not link or link in seen_in_source:
+                    continue
+
+                title_node = item.find('title')
+                desc_node = item.find('description')
+                date_node = item.find('pubDate')
+
+                title = title_node.text if (
+                    title_node is not None and title_node.text
+                ) else "No Title"
+                raw_body = desc_node.text if (
+                    desc_node is not None and desc_node.text
+                ) else ""
+                pub_date = date_node.text if (
+                    date_node is not None and date_node.text
+                ) else ""
+
+                body_text = re.sub(r'<[^>]+>', '', raw_body).strip()
+                if len(pub_date) > 16:
+                    pub_date = pub_date[:16]
+
+                # 简单子串匹配（与原始代码一致）
+                if (query_lower in title.lower()
+                        or query_lower in body_text.lower()):
+                    seen_in_source.add(link)
+                    results.append({
+                        "title": title,
+                        "body": (body_text[:200] + "... "
+                                if len(body_text) > 200 else body_text),
+                        "source": src['name'],
+                        "date": pub_date,
+                        "url": link,
+                    })
+
+            logger.debug(f"RSS源 [{src['name']}] 获取到 {len(results)} 条匹配")
+            return results
+
+        except Exception as e:
+            logger.debug(f"RSS源下载失败 [{src.get('name', '?')}]: {e}")
+            return []
 
     def run(self):
-        """完全对齐原始 backend.py 中已验证可工作的逻辑"""
-        import xml.etree.ElementTree as ET
+        """使用线程池并行获取所有RSS源，带总超时保护"""
+        import concurrent.futures
 
         if not self.query:
             self.news_ready.emit([], "")
             return
-
-        results = []
-        seen_links = set()
-        query_lower = self.query.lower().strip()
 
         # 从数据库获取启用的RSS源
         sources = []
@@ -246,7 +317,6 @@ class NewsWorker(QThread):
                 cur = conn.execute("SELECT name, url FROM rss_sources WHERE enabled=1")
                 sources = [{"name": r[0], "url": r[1]} for r in cur.fetchall()]
         except sqlite3.OperationalError:
-            # 表不存在时的兜底
             sources = [{"name": "China Daily",
                         "url": "http://www.chinadaily.com.cn/rss/world_rss.xml"}]
         except Exception as e:
@@ -256,64 +326,46 @@ class NewsWorker(QThread):
             self.news_ready.emit([], self.query)
             return
 
-        for src in sources:
-            data = fetch_url_content(src['url'])
-            if not data:
-                continue
+        all_results = []
+        seen_links = set()
 
+        # 使用线程池并行下载所有RSS源（关键优化！）
+        # 打包版本中每个源可能很慢（SSL握手慢），串行会导致长时间卡顿
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(len(sources), 5),
+            thread_name_prefix="rss_fetch"
+        ) as executor:
+            future_to_src = {
+                executor.submit(self._fetch_single_source, src): src
+                for src in sources
+            }
+
+            # 带总超时的等待
+            done_futures = set()
             try:
+                done_futures, _ = concurrent.futures.wait(
+                    future_to_src.keys(),
+                    timeout=self._total_timeout
+                )
+            except Exception:
+                pass
+
+            # 收集已完成任务的结果
+            for future in done_futures:
                 try:
-                    xml_str = data.decode('utf-8', 'ignore').strip()
+                    source_results = future.result(timeout=1)
+                    for r in source_results:
+                        if r['url'] not in seen_links:
+                            seen_links.add(r['url'])
+                            all_results.append(r)
                 except Exception:
-                    xml_str = data.decode('gbk', 'ignore').strip()
+                    pass
 
-                if not xml_str.startswith('<'):
-                    continue
+            # 记录超时的源
+            remaining = set(future_to_src.keys()) - done_futures
+            if remaining:
+                src_names = [future_to_src[f].get('name', '?') for f in remaining]
+                logger.warning(f"有{len(remaining)}个RSS源超时未完成: {src_names}")
 
-                root = ET.fromstring(xml_str)
-                items = root.findall('./channel/item')
-                if not items:
-                    items = root.findall('item')
-
-                for item in items:
-                    link_node = item.find('link')
-                    if link_node is None or not link_node.text:
-                        continue
-                    link = link_node.text.strip()
-                    if not link or link in seen_links:
-                        continue
-
-                    title_node = item.find('title')
-                    desc_node = item.find('description')
-                    date_node = item.find('pubDate')
-
-                    title = title_node.text if (
-                        title_node is not None and title_node.text
-                    ) else "No Title"
-                    raw_body = desc_node.text if (
-                        desc_node is not None and desc_node.text
-                    ) else ""
-                    pub_date = date_node.text if (
-                        date_node is not None and date_node.text
-                    ) else ""
-
-                    body_text = re.sub(r'<[^>]+>', '', raw_body).strip()
-                    if len(pub_date) > 16:
-                        pub_date = pub_date[:16]
-
-                    # 简单子串匹配（与原始代码一致）
-                    if (query_lower in title.lower()
-                            or query_lower in body_text.lower()):
-                        seen_links.add(link)
-                        results.append({
-                            "title": title,
-                            "body": (body_text[:200] + "..."
-                                    if len(body_text) > 200 else body_text),
-                            "source": src['name'],
-                            "date": pub_date,
-                            "url": link,
-                        })
-            except Exception as e:
-                continue
-
-        self.news_ready.emit(results, self.query)
+        logger.info(f"新闻搜索完成: query='{self.query}', 共获取 {len(all_results)} 条结果")
+        self.news_ready.emit(all_results, self.query)
