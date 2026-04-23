@@ -126,8 +126,13 @@ class MDDCacheManager:
 
     @staticmethod
     def cleanup_all():
-        """清理所有线程的数据库连接（应用关闭时调用）"""
+        """清理所有线程的数据库连接（应用关闭时调用）
+        
+        注意：threading.local() 的限制意味着只能清理当前线程的连接。
+        子线程中的连接无法从主线程关闭，但进程退出时OS会回收。
+        """
         try:
+            # 清理当前线程的连接
             if hasattr(MDDCacheManager._thread_local, "conn"):
                 conn = getattr(MDDCacheManager._thread_local, "conn", None)
                 if conn:
@@ -136,7 +141,7 @@ class MDDCacheManager:
                     except Exception:
                         pass
                 delattr(MDDCacheManager._thread_local, "conn")
-            logger.info("MDD缓存连接已清理")
+            logger.info("MDD缓存连接已清理(当前线程)")
         except Exception as e:
             logger.warning(f"清理MDD连接时出错: {e}")
 

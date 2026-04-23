@@ -122,7 +122,6 @@ class SearchSplitPage(QWidget):
 
         # === 右侧 Tab ===
         self.right_tabs = QTabWidget()
-        self.right_tabs.currentChanged.connect(self.on_tab_changed)
 
         # 词典 Web 视图
         self.web_dict = QWebEngineView()
@@ -376,28 +375,6 @@ class SearchSplitPage(QWidget):
 
     # ========== 标签页切换 ==========
 
-    def on_tab_changed(self, index: int):
-        """Tab切换回调"""
-        if index == 1:
-            if self.current_news_query and self.current_news_query != self.last_loaded_news_query:
-                self.is_in_reader_mode = False
-                # 安全终止前一个worker
-                if hasattr(self, 'news_worker') and self.news_worker is not None:
-                    try:
-                        self.news_worker.quit()
-                        self.news_worker.wait(1000)
-                    except Exception:
-                        pass
-                    self.news_worker = None
-                self.web_news.setHtml("<h3>Loading News...</h3>")
-                self.news_worker = NewsWorker(self.current_news_query)
-                self.news_worker.news_ready.connect(self.render_news)
-                self._worker_ref = self.news_worker
-                def _cleanup():
-                    self._worker_ref = None
-                self.news_worker.finished.connect(_cleanup)
-                self.news_worker.start()
-
     def on_news_lookup(self, word: str, context: str):
         """新闻页面触发的查词请求"""
         self.is_in_reader_mode = False  # 退出阅读模式
@@ -431,6 +408,10 @@ class SearchSplitPage(QWidget):
             self.news_worker.start()
 
     # ========== 搜索核心方法 ==========
+
+    def search_word(self, word: str):
+        """公开接口：跳转到搜索页并查词（供 main_window / vocab_page / history_page 调用）"""
+        self.do_search(word, from_list=True)
 
     def do_search(
         self, text: str, push: bool = True, update_news: bool = False,

@@ -165,11 +165,6 @@ class ModernMainWindow(QMainWindow):
             self.theme_page = ThemePage(self)
             self.page_stack.addWidget(self.theme_page)
             self._page_cache['theme'] = self.theme_page
-            # 补连信号
-            if hasattr(self.analyzer_page, 'word_lookup_requested'):
-                self.analyzer_page.word_lookup_requested.connect(
-                    lambda word: self._search_word(word)
-                )
         elif page_name == 'dict_manager':
             from src.ui.pages.dict_manager_page import DictManagerPage
             self.dict_manager_page = DictManagerPage()
@@ -188,10 +183,10 @@ class ModernMainWindow(QMainWindow):
             self.analyzer_page = TextAnalyzerPage()
             self.page_stack.addWidget(self.analyzer_page)
             self._page_cache['analyzer'] = self.analyzer_page
-            if hasattr(self.theme_page, '__class__'):  # theme已创建则连接，否则等theme创建时再连
-                self.analyzer_page.word_lookup_requested.connect(
-                    lambda word: self._search_word(word)
-                )
+            # 始终连接查词信号（不再依赖theme页面是否已创建）
+            self.analyzer_page.word_lookup_requested.connect(
+                lambda word: self._search_word(word)
+            )
 
         logger.info(f"懒加载页面完成: {page_name}")
 
@@ -224,6 +219,13 @@ class ModernMainWindow(QMainWindow):
         self._navigate_to('search')
         if hasattr(self.search_page, 'search_word'):
             self.search_page.search_word(word)
+
+    def switch_to_search(self, word: str = ""):
+        """跳转到搜索页并查词（别名方法，供vocab/history等页面调用）"""
+        if word:
+            self._search_word(word)
+        else:
+            self._navigate_to('search')
 
     def _on_nav_changed(self, page_name):
         """处理导航切换"""
