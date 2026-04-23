@@ -9,6 +9,7 @@ import logging
 
 from .config import DB_FILE, MDD_DB_FILE
 from .logger import logger
+from .utils import is_valid_browse_word
 
 
 class DatabaseManager:
@@ -64,6 +65,23 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_word_dict "
                 "ON standard_entries(word COLLATE NOCASE, dict_id)"
             )
+
+            # 干净词条浏览表：仅存储有效的英文单词，用于词典列表浏览
+            # 过滤规则：以英文字母开头，2~50字符，排除特殊符号/数字/短句等垃圾词条
+            # 导入时由 indexer_worker 填充，查询时直接使用，无需再过滤
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dict_browse_words (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word TEXT NOT NULL,
+                    dict_id INTEGER NOT NULL,
+                    UNIQUE(word, dict_id)
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_browse_word_dict ON dict_browse_words(word COLLATE NOCASE, dict_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_browse_dict ON dict_browse_words(dict_id)")
+
+            # 迁移：如果浏览表为空但标准词条表有数据，自动填充干净词条
+            DatabaseManager._migrate_browse_words(conn)
             
             # FTS5 全文检索表
             conn.execute(
@@ -142,6 +160,62 @@ class DatabaseManager:
                 """CREATE TABLE IF NOT EXISTS cached_dicts 
                    (dict_id INTEGER PRIMARY KEY, mdd_path TEXT, cached_time REAL)"""
             )
+
+
+    @staticmethod
+    def _migrate_browse_words(conn: sqlite3.Connection):
+        """迁移：从 standard_entries 填充 dict_browse_words（仅首次/空表时执行）
+        
+        对于已导入词典但 dict_browse_words 表为空的老用户，
+        自动扫描标准词条表，提取合法英文单词填充到浏览表中。
+        """
+        try:
+            browse_count = conn.execute("SELECT COUNT(*) FROM dict_browse_words").fetchone()[0]
+            if browse_count > 0:
+                logger.debug(f"dict_browse_words 已有 {browse_count} 条数据，跳过迁移")
+                return
+
+            # 检查是否有可迁移的数据
+            total = conn.execute("SELECT COUNT(*) FROM standard_entries").fetchone()[0]
+            if total == 0:
+                return
+
+            logger.info(f"开始迁移浏览词条（standard_entries 共 {total} 条）...")
+
+            # 批量提取合法单词
+            migrated = 0
+            batch = []
+            batch_size = 5000
+            
+            cursor = conn.execute(
+                "SELECT DISTINCT word, dict_id FROM standard_entries ORDER BY word"
+            )
+            
+            for row in cursor:
+                word, did = row
+                if is_valid_browse_word(word):
+                    batch.append((word, did))
+                    
+                    if len(batch) >= batch_size:
+                        conn.executemany(
+                            "INSERT OR IGNORE INTO dict_browse_words(word, dict_id) VALUES (?,?)",
+                            batch
+                        )
+                        migrated += len(batch)
+                        batch = []
+
+            if batch:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO dict_browse_words(word, dict_id) VALUES (?,?)",
+                    batch
+                )
+                migrated += len(batch)
+
+            conn.commit()
+            logger.info(f"浏览词条迁移完成：{migrated} 个合法单词")
+
+        except Exception as e:
+            logger.warning(f"浏览词条迁移失败（非致命，不影响正常使用）: {e}")
 
 
 def get_connection(db_file: str = DB_FILE, **kwargs) -> sqlite3.Connection:

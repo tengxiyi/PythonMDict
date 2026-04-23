@@ -28,6 +28,7 @@ env/
 
 # Build outputs
 *.spec
+dist_nuitka/
 Nuitka打包说明.docx
 打包指令： pyinstaller build.spec   .txt
 

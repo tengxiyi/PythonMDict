@@ -170,8 +170,8 @@ class ModernMainWindow(QMainWindow):
             self.dict_manager_page = DictManagerPage()
             self.page_stack.addWidget(self.dict_manager_page)
             self._page_cache['dict_manager'] = self.dict_manager_page
-            if hasattr(self.search_page, 'refresh_dict_list'):
-                self.dict_manager_page.dict_imported.connect(self.search_page.refresh_dict_list)
+            if hasattr(self.search_page, 'load_dict_selector'):
+                self.dict_manager_page.dict_imported.connect(self.search_page.load_dict_selector)
         elif page_name == 'history':
             from src.ui.pages.history_page import HistoryPage
             self.history_page = HistoryPage()

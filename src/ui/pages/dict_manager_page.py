@@ -315,6 +315,7 @@ class DictManagerPage(QWidget):
         try:
             with sqlite3.connect(DB_FILE) as conn:
                 conn.execute("DELETE FROM standard_entries WHERE dict_id=?", (dict_id,))
+                conn.execute("DELETE FROM dict_browse_words WHERE dict_id=?", (dict_id,))
                 conn.execute("DELETE FROM dict_info WHERE id=?", (dict_id,))
                 conn.commit()
             logger.info(f"已删除词典 ID={dict_id}")

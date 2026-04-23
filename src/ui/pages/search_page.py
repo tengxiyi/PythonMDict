@@ -10,6 +10,7 @@ import re
 import sqlite3
 import time
 import urllib.parse
+import zlib
 from datetime import datetime
 
 from PySide6.QtWidgets import (
@@ -134,6 +135,9 @@ class SearchSplitPage(QWidget):
         v_left.addWidget(self.list_header)
         v_left.addWidget(self.list_widget)
 
+        # 应用美化滚动条样式（跟随主题）
+        self._apply_list_scrollbar_style()
+
         # 词典浏览模式的分页状态
         self._browse_dict_id = None      # 当前浏览的词典ID
         self._browse_offset = 0          # 分页偏移
@@ -198,10 +202,10 @@ class SearchSplitPage(QWidget):
         import re
         import hashlib
         from datetime import date
-        from ...core.utils import STOP_WORDS
+        from ...core.utils import STOP_WORDS, _VALID_WORD_LOOSE
 
-        # 合法单词模式：纯英文，允许内部连字符/撇号（如 mother-in-law, it's）
-        VALID_WORD = re.compile(r'^[a-zA-Z][a-zA-Z\'\-]*[a-zA-Z]$|^[a-zA-Z]{2,}$')
+        # 每日一词用宽松版正则（允许 "I", "a" 等单字母词）
+        VALID_WORD = _VALID_WORD_LOOSE
 
         try:
             with sqlite3.connect(DB_FILE) as conn:
@@ -351,6 +355,78 @@ class SearchSplitPage(QWidget):
         self.btn_pin.setIcon(create_svg_icon(self.tool_icons['pin'], c))
         self.btn_monitor.setIcon(create_svg_icon(self.tool_icons['monitor'], c))
         self.check_fav(self.entry.text())
+
+    def _apply_list_scrollbar_style(self):
+        """为列表滚动条应用主题化的美化样式"""
+        from ..theme_manager import theme_manager as _tm
+        if not _tm:
+            return
+
+        c = _tm.colors
+        primary = c.get('primary', '#2196F3')
+        border = c.get('border', '#E0E0E0')
+        hover = c.get('hover', '#F5F5F5')
+        bg = c.get('sidebar', '#F5F7FA')
+        text = c.get('text', '#333333')
+
+        # 判断深浅色主题以调整滚动条颜色
+        bg_hex = bg.lstrip('#')
+        is_dark = False
+        if len(bg_hex) == 6:
+            r, g, b = tuple(int(bg_hex[i:i + 2], 16) for i in (0, 2, 4))
+            is_dark = (r * 0.299 + g * 0.587 + b * 0.114) < 128
+
+        if is_dark:
+            track_color = "transparent"
+            thumb_color = "#555555"
+            thumb_hover = "#777777"
+        else:
+            track_color = "transparent"
+            thumb_color = "#c1c1c1"
+            thumb_hover = "#a8a8a8"
+
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {bg};
+                color: {text};
+                border: none;
+                outline: none;
+            }}
+            QListWidget::item {{
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin: 1px 4px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {primary}22;
+                color: {text};
+            }}
+            QListWidget::item:hover {{
+                background-color: {hover};
+            }}
+            QScrollBar:vertical {{
+                background: {track_color};
+                width: 8px;
+                border-radius: 4px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {thumb_color};
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {thumb_hover};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        """)
 
     def init_shortcuts(self):
         """初始化快捷键"""
@@ -588,14 +664,18 @@ class SearchSplitPage(QWidget):
             self.news_worker.finished.connect(_cleanup)
             self.news_worker.start()
 
-    def render_dict(self, q: str, rows: list, suggestions: list):
+    def render_dict(self, q: str, rows: list, suggestions: list, update_list: bool = True):
         """
         渲染词典搜索结果到 Web 视图
         同时更新左侧列表（全部词典模式下显示搜索结果）
+
+        Args:
+            update_list: 是否同步更新左侧搜索结果列表。
+                         点击列表项时设为 False，避免清空原有列表只留单项。
         """
 
         # 全部词典模式：将搜索结果填充到左侧列表
-        if self._browse_dict_id is None:
+        if update_list and self._browse_dict_id is None:
             self.list_widget.clear()
             self.list_header.setText(f"搜索结果 ({len(rows)})")
             for r in rows:
@@ -717,10 +797,14 @@ class SearchSplitPage(QWidget):
                     if(s) window.location.href = 'entry://query/' + encodeURIComponent(s); 
                 });
 
-                // 点击拦截器
-                document.addEventListener('click', function(e){ 
-                    var t = e.target.closest('a'); 
-                    if (t) { 
+                // 点击拦截器（排除 .oaldpe 容器，避免干扰 OALDPE 设置面板交互）
+                document.addEventListener('click', function(e){
+                    // OALDPE 词典自带完整的交互逻辑（齿轮按钮、设置面板、折叠等），
+                    // 不应被全局拦截器覆盖。oaldpe.js 会自行处理内部所有点击事件。
+                    try { if (e.target.closest('.oaldpe')) return; } catch(ex) {}
+
+                    var t = e.target.closest('a');
+                    if (t) {
                         try { if (t.closest('.action-bar')) return; } catch(ex) {}
                         var href = t.getAttribute('href'); 
                         if (!href) return;
@@ -858,52 +942,8 @@ class SearchSplitPage(QWidget):
                 });</script>
             """
 
-        # OALDPE等词典的兼容性脚本：确保非Eudic环境下齿轮按钮能正确注入
-        oaldpe_compat_js = """
-        <script>
-        (function(){
-          // 等待词典JS初始化完成（oaldpeInit对象创建后执行）
-          function tryFixOALDPE() {
-            // 检测是否是OALDPE词条
-            var oaldpeEl = document.querySelector('.oaldpe');
-            if (!oaldpeEl) return;
-            
-            // 检查齿轮按钮是否已注入
-            if (document.querySelector('.oaldpe-config-gear')) return;
-            
-            // OALDPE JS在非Eudic环境下查找 .idm-g 元素来注入齿轮按钮
-            // 但我们的渲染结构中没有 .idm-g，需要添加兼容处理
-            if (!document.querySelector('.idm-g')) {
-              // 找到 .oald-entry-root 作为目标容器
-              var entryRoot = oaldpeEl.querySelector('.oald-entry-root, .entry, #entryContent, [class*="root"]');
-              if (entryRoot && !entryRoot.classList.contains('idm-g')) {
-                entryRoot.classList.add('idm-g');
-                console.log('[OALDPE compat] Added .idm-g class for gear button injection');
-              }
-              
-              // 如果还没找到，给第一个直接子元素加
-              if (!document.querySelector('.idm-g')) {
-                var firstChild = oaldpeEl.firstElementChild;
-                while (firstChild && firstChild.nodeType === 3) firstChild = firstChild.nextSibling;
-                if (firstChild) {
-                  firstChild.classList.add('idm-g');
-                  console.log('[OALDPE compat] Added .idm-g to first child of .oaldpe');
-                }
-              }
-            }
-          }
-          
-          // 多次尝试（JS加载可能有延迟）
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() { setTimeout(tryFixOALDPE, 300); });
-          } else {
-            setTimeout(tryFixOALDPE, 300);
-          }
-          setTimeout(tryFixOALDPE, 1500);
-          setTimeout(tryFixOALDPE, 3000);
-        })();
-        </script>
-        """
+        # OALDPE 兼容性脚本 — 改为通过 runJavaScript 注入，避免 HTML <script> 解析问题
+        oaldpe_compat_js = ""
 
         def _normalize_entry_content(d_id, html_content):
             if not html_content:
@@ -941,15 +981,44 @@ class SearchSplitPage(QWidget):
         dict_card_css = (
             "@font-face{font-family:'Kingsoft Phonetic Plain';src:url('mdict://theme/kingsoft_phonetic.ttf');}"
             + css + iframe_css +
-            "body{padding:20px;max-width:900px;margin:0 auto;}"
+            "body{padding:20px;max-width:900px;margin:0 auto;overflow-x:visible!important;overflow-y:auto!important;}"
             # 注意：不设置 img pointer-events:none，否则词典自带按钮(如OALDPE眼镜图标)无法交互
             # entry-content 和 card 必须设 overflow:visible，否则词典自带弹出面板(如设置菜单)会被裁剪
-            ".entry-content{overflow:visible!important;position:relative;z-index:1;}"
+            ".entry-content{overflow:visible!important;position:relative;z-index:1;min-height:1px;}"
             ".entry-content img{max-width:100%;height:auto;border:none!important;outline:none!important;}"
             ".card{background:var(--card);padding:25px;margin-bottom:25px;border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--border);position:relative;overflow:visible!important;}"
             ".badge{background:var(--bg);color:var(--primary);border:1px solid var(--primary);padding:3px 8px;border-radius:12px;font-size:12px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;}"
             ".card-header{display:flex;align-items:center;gap:10px;margin-bottom:15px;padding-bottom:10px;border-bottom:1px dashed var(--border);}"
             ".card-word{font-size:18px;font-weight:bold;color:var(--text);flex:1;}"
+            # === OALDPE 齿轮面板修复（只做 overflow 可见 + hover polyfill）===
+            # 原理：齿轮面板通过 CSS :hover 从 width:0;height:0 展开，
+            # 如果祖先容器有 overflow:hidden 则展开后的面板被裁剪不可见。
+            # QWebEngine 中 CSS :hover 可能不触发，用 .force-hover 类模拟。
+            ".oaldpe{overflow:visible!important;}"
+            ".oaldpe .oald-entry-root{overflow:visible!important;}"
+            ".oaldpe .entry{overflow:visible!important;}"
+            ".oaldpe .top-container{overflow:visible!important;}"
+            ".oaldpe .webtop{overflow:visible!important;}"
+            # === Hover Polyfill：.force-hover 镜像 oaldpe.css 所有 :hover 规则 ===
+            # 当面板展开时提升父卡片层级，防止被相邻 .card 遮挡或点击穿透
+            ".card.gear-active-card{z-index:100!important;position:relative!important;}"
+            ".oaldpe-config-gear.force-hover{z-index:9999!important;}"
+            ".oaldpe-config-gear.force-hover>.oaldpe-config-gear__head,"
+            ".oaldpe-config-gear.force-hover>.oaldpe-config-gear__body"
+            "{opacity:1!important;visibility:visible!important;overflow:visible!important;"
+            " pointer-events:auto!important;}"
+            ".oaldpe-config-gear.force-hover>.oaldpe-config-gear__head"
+            "{width:100%!important;height:2.35em!important;border-bottom:unset!important;border-radius:4px 1.1em 0 0!important;}"
+            # 只强制显示和点击穿透，不覆盖尺寸/定位/边框，避免干扰原始 oaldpe.css
+            ".oaldpe-config-gear.force-hover>.oaldpe-config-gear__body"
+            "{opacity:1!important;visibility:visible!important;overflow:visible!important;"
+            " pointer-events:auto!important;}"
+            ".oaldpe-config-gear.force-hover .oaldpe-config-gear__head__brand"
+            "{transform:translate(-50%,-50%);opacity:1;}"
+            ".oaldpe-config-gear.force-hover .oaldpe-config-gear__icon::before"
+            "{opacity:1!important;transform:scale(.7) rotate(0)!important;}"
+            ".oaldpe-config-gear.force-hover .oaldpe-config-gear__icon::after"
+            "{transform:scale(.8)!important;}"
         )
         html_parts = [f"""<html><head><meta charset='utf-8'>
             <style>{dict_card_css}</style>
@@ -1002,8 +1071,77 @@ class SearchSplitPage(QWidget):
                 pass
 
         final_html = "".join(html_parts)
-
         self.web_dict.setHtml(final_html, baseUrl=QUrl(base_url))
+
+        # 通过 runJavaScript 注入 OALDPE 兼容脚本（绕过 HTML <script> 解析问题）
+        from PySide6.QtCore import QTimer
+        def _inject_oaldpe_compat():
+            js_code = r"""
+            (function(){
+              if(window.__oaldpeCompatInjected) return;
+              window.__oaldpeCompatInjected = true;
+
+              function ensureOverflowVisible() {
+                document.querySelectorAll('.oaldpe,.oald-entry-root,.entry,.top-container,.webtop')
+                  .forEach(function(el){ el.style.overflow='visible'; });
+              }
+
+              function setupGearEvents(gear) {
+                if(gear._ge!==undefined) return;
+                var icon=gear.querySelector('.oaldpe-config-gear__icon');
+                var body=gear.querySelector('.oaldpe-config-gear__body');
+                if(!icon){ gear._ge=false; return; }
+                gear._ge=true;
+
+                var t=null;
+                function show(){
+                    clearTimeout(t);
+                    gear.classList.add('force-hover');
+                    var c=gear.closest('.card');
+                    if(c) c.classList.add('gear-active-card');
+                }
+                function hide(e){
+                    if(e && e.relatedTarget && gear.contains(e.relatedTarget)) return;
+                    t=setTimeout(function(){
+                        gear.classList.remove('force-hover');
+                        var c=gear.closest('.card');
+                        if(c) c.classList.remove('gear-active-card');
+                    },400);
+                }
+
+                icon.addEventListener('mouseenter',show);
+                icon.addEventListener('mouseleave',hide);
+                if(body){
+                    body.addEventListener('mouseenter',show);
+                    body.addEventListener('mouseleave',hide);
+                }
+              }
+
+              function init() {
+                ensureOverflowVisible();
+                if(!document.body){ setTimeout(init,200); return; }
+                document.querySelectorAll('.oaldpe-config-gear').forEach(setupGearEvents);
+
+                new MutationObserver(function(ms){
+                  ms.forEach(function(m){
+                    m.addedNodes.forEach(function(n){
+                      if(n.nodeType!==1) return;
+                      if(n.classList&&n.classList.contains('oaldpe-config-gear')) setupGearEvents(n);
+                      if(n.querySelectorAll) n.querySelectorAll('.oaldpe-config-gear').forEach(function(g){setupGearEvents(g);});
+                    });
+                  });
+                }).observe(document.body||document.documentElement,{childList:true,subtree:true});
+              }
+
+              setTimeout(init,300);
+              setTimeout(init,1500);
+            })();
+            """
+            self.web_dict.page().runJavaScript(js_code)
+            logger.info("[OALDPE] compat JS injected via runJavaScript")
+
+        QTimer.singleShot(500, _inject_oaldpe_compat)
+        QTimer.singleShot(2000, _inject_oaldpe_compat)
 
     def refresh_webview(self):
         """刷新当前Web视图"""
@@ -1305,7 +1443,14 @@ class SearchSplitPage(QWidget):
             self.load_more_dict_entries()
 
     def load_more_dict_entries(self):
-        """加载更多词典词条（分页）"""
+        """从 dict_browse_words 干净词条表加载更多单词（分页）
+        
+        dict_browse_words 表在 MDX 导入时就已过滤掉所有非英文词条，
+        只保留合法的英文字母单词，查询时无需再过滤。
+        
+        - 无过滤时：按字母 A-Z 顺序排列
+        - 有过滤时：前缀模糊匹配 + 字母排序
+        """
         if self._browse_dict_id is None or self._browse_loading or not self._browse_has_more:
             return
 
@@ -1314,26 +1459,40 @@ class SearchSplitPage(QWidget):
 
         try:
             with sqlite3.connect(DB_FILE) as conn:
+                # 直接从干净词条表查询（数据已在导入时过滤过）
+                params = [self._browse_dict_id]
+                
                 if filter_text:
-                    # 过滤模式
-                    rows = conn.execute(
-                        "SELECT word FROM standard_entries "
+                    # 前缀匹配（LIKE 不区分大小写）
+                    sql = (
+                        "SELECT word FROM dict_browse_words "
                         "WHERE dict_id=? AND word LIKE ? "
-                        "ORDER BY word COLLATE NOCASE "
-                        "LIMIT ? OFFSET ?",
-                        (self._browse_dict_id, f"{filter_text}%",
-                         self._browse_limit, self._browse_offset)
-                    ).fetchall()
+                        "ORDER BY word COLLATE NOCASE LIMIT ? OFFSET ?"
+                    )
+                    params.extend([f"{filter_text}%", self._browse_limit, self._browse_offset])
                 else:
-                    # 全量浏览模式
-                    rows = conn.execute(
-                        "SELECT word FROM standard_entries "
-                        "WHERE dict_id=? "
-                        "ORDER BY word COLLATE NOCASE "
-                        "LIMIT ? OFFSET ?",
-                        (self._browse_dict_id, self._browse_limit, self._browse_offset)
-                    ).fetchall()
+                    # 全量浏览：纯字母排序
+                    sql = (
+                        "SELECT word FROM dict_browse_words "
+                        "WHERE dict_id=? ORDER BY word COLLATE NOCASE LIMIT ? OFFSET ?"
+                    )
+                    params.extend([self._browse_limit, self._browse_offset])
 
+                rows = conn.execute(sql, params).fetchall()
+
+                # 获取总数用于标题显示
+                count_params = [self._browse_dict_id]
+                if filter_text:
+                    count_sql = (
+                        "SELECT COUNT(*) FROM dict_browse_words "
+                        "WHERE dict_id=? AND word LIKE ?"
+                    )
+                    count_params.append(f"{filter_text}%")
+                else:
+                    count_sql = "SELECT COUNT(*) FROM dict_browse_words WHERE dict_id=?"
+                total_count = conn.execute(count_sql, count_params).fetchone()[0]
+
+                # 填充列表
                 for (word,) in rows:
                     item = QListWidgetItem(word)
                     item.setData(Qt.UserRole, {
@@ -1345,6 +1504,12 @@ class SearchSplitPage(QWidget):
 
                 self._browse_has_more = len(rows) >= self._browse_limit
                 self._browse_offset += len(rows)
+
+                # 更新列表标题显示当前范围
+                showing = min(self._browse_offset, total_count)
+                self.list_header.setText(
+                    f"浏览: {self.combo_dict.currentText()} ({showing}/{total_count})"
+                )
 
         except Exception as e:
             logger.warning(f"加载词条列表失败: {e}")
@@ -1369,17 +1534,21 @@ class SearchSplitPage(QWidget):
         word = data.get("word")
         dict_id = data.get("dict_id")
 
-        if item_type == "dict_entry":
+        if not word:
+            return
+
+        if item_type == "dict_entry" and dict_id:
             # 词典浏览模式：直接显示该词条在该词典中的解释
             self.show_dict_entry(word, dict_id)
-        elif item_type == "search_result":
+        elif item_type == "search_result" and dict_id:
             # 搜索结果模式：显示该搜索结果对应的解释
             self.show_dict_entry(word, dict_id)
         else:
+            # 兜底：用全局搜索
             self.do_search(word, from_list=True)
 
     def show_dict_entry(self, word: str, dict_id: int):
-        """显示指定词条在指定词典中的解释"""
+        """显示指定词条在指定词典中的解释（支持 @@@LINK= 变体自动跳转）"""
         self.entry.setText(word)
         self.check_fav(word)
         self.current_context = ""
@@ -1394,26 +1563,67 @@ class SearchSplitPage(QWidget):
                 if not row:
                     self.web_dict.setHtml(
                         f"<html><body><h3 style='color:#888;text-align:center;margin-top:50px'>"
-                        f"Not found: {word}</h3></body></html>"
+                        f"Not found: {word} in this dictionary</h3></body></html>"
                     )
                     return
+
+                content_blob = row[0]
+
+                # 检测 @@@LINK= 变体词条（如 abdications -> @@@LINK=abdication）
+                # 这类词条是 MDX 词典的内部重定向/索引条目，不是真正的释义
+                try:
+                    raw_text = content_blob if isinstance(content_blob, str) else (
+                        zlib.decompress(content_blob).decode('utf-8', 'ignore')
+                    )
+                    # 去除可能的空白
+                    stripped = raw_text.strip()
+                    if stripped.startswith('@@@LINK=') or stripped.startswith('@@@link='):
+                        link_target = stripped.split('=', 1)[1].strip()
+                        logger.debug(f"[show_dict_entry] 检测到变体链接: {word} -> {link_target}")
+
+                        # 在同一本词典中查找目标词
+                        link_row = conn.execute(
+                            "SELECT content FROM standard_entries WHERE word=? AND dict_id=?",
+                            (link_target, dict_id)
+                        ).fetchone()
+
+                        if link_row:
+                            content_blob = link_row[0]
+                            word = link_target  # 更新显示词为目标词
+                            self.entry.setText(word)
+                            self.check_fav(word)
+                        else:
+                            # 链接目标也找不到，显示提示信息
+                            self.web_dict.setHtml(
+                                f"<html><body><h3 style='color:#888;text-align:center;margin-top:50px'>"
+                                f"{word}</h3>"
+                                f"<p style='text-align:center;color:#aaa;'>"
+                                f"See also: <b>{link_target}</b> (variant entry)</p>"
+                                f"</body></html>"
+                            )
+                            return
+                except Exception as e:
+                    logger.debug(f"@@@LINK 解析失败({word}): {e}")
 
                 from ...core.utils import process_entry_task
                 d_info_row = conn.execute(
                     "SELECT name, path FROM dict_info WHERE id=?", (dict_id,)
                 ).fetchone()
-                d_info = {"name": d_info_row[0] if d_info_row else "未知",
+                d_info = {"name": d_info_row[0] if d_info_row else "Unknown",
                           "path": d_info_row[1] if d_info_row else None}
 
-                result = process_entry_task((word, row[0], dict_id, 1.0, d_info))
+                result = process_entry_task((word, content_blob, dict_id, 1.0, d_info))
                 if result:
-                    self._render_single_result(word, [result])
+                    # 直接使用 render_dict 渲染（复用完整的 iframe + CSS + JS 支持）
+                    # 这样 mdict:// 资源链接、音频播放、OALDPE 兼容脚本都能正常工作
+                    # update_list=False：不清空左侧列表，保持所有搜索结果可见
+                    self.render_dict(word, [result], [], update_list=False)
 
         except Exception as e:
-            logger.error(f"显示词条失败({word}, did={dict_id}): {e}")
+            logger.error(f"显示词条失败({word}, did={dict_id}): {e}", exc_info=True)
             self.web_dict.setHtml(
                 f"<html><body><h3 style='color:#c00;text-align:center;margin-top:50px'>"
-                f"Error loading {word}</h3></body></html>"
+                f"Error loading {word}: {e}</h3></body></html>"
             )
 
     def _render_single_result(self, word: str, results: list):

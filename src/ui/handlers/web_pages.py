@@ -33,6 +33,18 @@ class DictWebPage(QWebEnginePage):
     word_lookup_requested = Signal(str, str)
     import_requested = Signal()
 
+    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+        """将 QWebEngine JS 控制台输出转发到 Python 日志"""
+        prefix = f"[JS:{lineNumber}]"
+        if level == QWebEnginePage.JavaScriptConsoleMessageLevel.InfoMessageLevel:
+            logger.info(f"{prefix} {message}")
+        elif level == QWebEnginePage.JavaScriptConsoleMessageLevel.WarningMessageLevel:
+            logger.warning(f"{prefix} {message}")
+        elif level == QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel:
+            logger.error(f"{prefix} {message}")
+        else:
+            logger.debug(f"{prefix} {message}")
+
     def createWindow(self, _type):
         """拦截 target="_blank" 在当前窗口打开"""
         return self

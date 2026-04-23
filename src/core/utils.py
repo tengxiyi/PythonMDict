@@ -362,3 +362,44 @@ STOP_WORDS = {
     "is", "are", "was", "were", "been", "has", "had", "did", "does", "am"
 }
 """Top 150 常见英文停用词 - 过滤后剩下的往往是学习价值高的实词"""
+
+# ============== 合法单词模式 ==============
+import re
+# 加强版：要求至少以 2 个字母开头（过滤掉 a's, a'as, a-a 等单字母变体）
+# 允许内部连字符（mother-in-law）和撇号（it's）
+# 长度 2~50 字符
+_VALID_WORD_STRICT = re.compile(r'^[a-zA-Z]{2,}[a-zA-Z\'\-]*[a-zA-Z]$|^[a-zA-Z]{2,50}$')
+
+# 宽松版：用于每日一词等场景（允许单字母开头的合法词如 "I", "a" 等）
+_VALID_WORD_LOOSE = re.compile(r'^[a-zA-Z][a-zA-Z\'\-]*[a-zA-Z]$|^[a-zA-Z]{2,}$')
+
+# 排除所有格后缀模式（'s 结尾的词，如 abacus's, it's 中的 's 变体）
+_RE_POSSESSIVE_SUFFIX = re.compile(r"['\u2019]s$", re.IGNORECASE)
+
+def is_valid_browse_word(word: str) -> bool:
+    """
+    综合判断一个词是否应该出现在词典浏览列表中。
+    
+    过滤规则：
+    1. 通过严格正则（至少2字母开头/结尾，允许内部连字符撇号）
+    2. 排除所有格后缀（abacus's -> 跳过，保留 abacus）
+    3. 长度 2~50 字符
+    """
+    if not word or len(word) < 2 or len(word) > 50:
+        return False
+    if not _VALID_WORD_STRICT.match(word):
+        return False
+    if _RE_POSSESSIVE_SUFFIX.search(word):
+        return False
+    return True
+
+# 默认导出别名（函数版，用于词典浏览列表过滤）
+VALID_WORD = is_valid_browse_word
+"""
+VALID_WORD (严格版, 函数形式) - 用于词典浏览列表过滤：
+- 以至少 2 个英文字母开头（排除 a's, a'as, x-ray 等单字母变体）
+- 以英文字母结尾
+- 排除所有格 's 后缀（abacus's, abandoner's 等）
+- 允许内部有连字符（mother-in-law）和非所有格撇号
+- 或至少 2 个纯字母单词
+用于过滤 MDX 导入时的垃圾词条（#tag、$100、%符号、缩写变体等）"""

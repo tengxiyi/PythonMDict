@@ -11,7 +11,7 @@ import time
 from PySide6.QtCore import QThread, Signal
 
 from .config import DB_FILE, MDD_DB_FILE, IMPORT_MDX_BATCH_SIZE, IMPORT_MDD_BATCH_SIZE
-from .utils import pre_process_entry_content, space_cjk, RE_HTML_TAG, RE_WHITESPACE
+from .utils import pre_process_entry_content, space_cjk, RE_HTML_TAG, RE_WHITESPACE, VALID_WORD
 from .logger import logger
 from .connection_pool import pool
 
@@ -125,6 +125,7 @@ class IndexerWorker(QThread):
 
         batch_std = []
         batch_fts = []
+        batch_browse = []  # 干净单词列表（用于词典浏览）
         count = 0
         total_count = 0  # 实际处理的条目数（用于进度条）
         
@@ -185,6 +186,12 @@ class IndexerWorker(QThread):
                                 batch_fts.append((k_s, plain_text, did))
 
                         batch_std.append((k_s, v_c, did, len(k_s)))
+
+                        # 过滤出干净的英文单词，写入浏览专用表
+                        # VALID_WORD: 函数形式，综合判断（正则 + 排除 's 所有格后缀）
+                        if VALID_WORD(k_s):
+                            batch_browse.append((k_s, did))
+
                     except Exception:
                         continue
 
@@ -202,6 +209,13 @@ class IndexerWorker(QThread):
                                     "INSERT INTO fts_entries(word, content_text, dict_id) VALUES (?,?,?)",
                                     batch_fts
                                 )
+                                # 写入干净单词到浏览表（忽略重复）
+                                if batch_browse:
+                                    conn.executemany(
+                                        "INSERT OR IGNORE INTO dict_browse_words(word, dict_id) VALUES (?,?)",
+                                        batch_browse
+                                    )
+                                    batch_browse = []
                                 conn.commit()
                                 conn.execute("BEGIN TRANSACTION")
                                 count += len(batch_std)
@@ -226,8 +240,19 @@ class IndexerWorker(QThread):
                         "INSERT INTO fts_entries(word, content_text, dict_id) VALUES (?,?,?)",
                         batch_fts
                     )
+                    # 写入剩余的干净单词
+                    if batch_browse:
+                        conn.executemany(
+                            "INSERT OR IGNORE INTO dict_browse_words(word, dict_id) VALUES (?,?)",
+                            batch_browse
+                        )
                     conn.commit()
                     count += len(batch_std)
+
+                # 过滤复数形式（如果原形已存在，则去掉复数）
+                filtered = self._filter_plural_forms(conn, did)
+                if filtered:
+                    logger.info(f"{name}: 过滤复数形式 {filtered} 个")
 
                 logger.info(f"{name}: Total imported {count} entries")
                 
@@ -239,6 +264,45 @@ class IndexerWorker(QThread):
         except Exception as e:
             logger.error(f"MDX导入异常 ({name}): {e}", exc_info=True)
             raise
+
+    def _filter_plural_forms(self, conn: sqlite3.Connection, did: int) -> int:
+        """清理浏览表中已存在原形的复数形式单词，返回删除数量"""
+        rows = conn.execute(
+            "SELECT word FROM dict_browse_words WHERE dict_id=? ORDER BY word", (did,)
+        ).fetchall()
+        if not rows:
+            return 0
+
+        word_set = {w[0].lower() for w in rows}
+        to_delete = []
+
+        for (word,) in rows:
+            w = word.lower()
+            singular = None
+            # 优先级：ies -> es -> s，避免重叠误判
+            if w.endswith('ies') and len(w) > 4:
+                candidate = w[:-3] + 'y'
+                if candidate in word_set:
+                    singular = candidate
+            elif w.endswith('es') and len(w) > 3:
+                candidate = w[:-2]
+                if candidate in word_set:
+                    singular = candidate
+            elif w.endswith('s') and len(w) > 2:
+                candidate = w[:-1]
+                if candidate in word_set:
+                    singular = candidate
+
+            if singular:
+                to_delete.append(word)
+
+        if to_delete:
+            conn.executemany(
+                "DELETE FROM dict_browse_words WHERE word=? AND dict_id=?",
+                [(w, did) for w in to_delete]
+            )
+            conn.commit()
+        return len(to_delete)
 
     def process_mdd(self, mdd_paths: list[str], did: int, name: str):
         """处理MDD资源文件的导入"""
